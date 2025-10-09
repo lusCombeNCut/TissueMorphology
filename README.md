@@ -39,7 +39,7 @@ where:
 - $\hat{r}_i$ is the unit radial vector from center to cell $i$
 
 Cell dynamics follow the overdamped equation:
-$$\eta \frac{d\vec{r}_i}{dt} = \vec{F}_{spring}(i) + \vec{F}_{BM}(i) + \vec{F}_{random}(i)$$
+$$\eta {d\vec{r}_i \over dt} = \vec{F}_{spring}(i) + \vec{F}_{BM}(i) + \vec{F}_{random}(i)$$
 
 #### Key Assumptions
 - Cells behave as point masses in 2D
