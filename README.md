@@ -1,9 +1,102 @@
-# A template user project for use with Chaste.
+# TissueMorphology Project
 
-You now simply log in to github, then click the big green "Use this template" button to use a copy of this repository as the basis of your own new repository under your github username/organisation (this 'template' status avoids complications with forks all being linked back to this repo).
+A Chaste-based computational biology project for studying organoid formation and tissue morphology with basement membrane effects.
 
-Alternatively, if you aren't a github user, you can download a zip (see Releases button) and start your own repository with that.
+## Project Structure
 
-Then see the [User Projects](https://chaste.github.io/docs/user-guides/user-projects/) guide page on the Chaste website for more information.
+```
+TissueMorphology/
+├── src/                          # Source code
+│   ├── OrganoidCellFactory.hpp   # Cell factory with basement membrane properties
+│   └── BasementMembraneForce.hpp # Basement membrane force implementation
+├── test/                         # Test suite
+│   └── TestOrganoidFormation.hpp # Comprehensive organoid formation tests
+├── CMakeLists.txt               # Build configuration
+├── visualize_chaste_results.py  # Main visualization script
+├── create_visualizations.py     # Comparison visualization script
+├── VISUALIZATION_GUIDE.md       # Detailed visualization documentation
+└── README.md                    # This file
+```
 
-If you clone this repository, you should make sure to rename the template_project folder with your project name and run the 'setup_project.py' script to avoid conflicts if you have multiple projects.
+## Features
+
+### Computational Models
+- **OrganoidCellFactory**: Creates cell populations with basement membrane stiffness properties
+- **BasementMembraneForce**: Applies radial constraints simulating basement membrane effects
+- **Cell-based simulations**: Uses Chaste's MeshBasedCellPopulation framework
+
+### Test Suite  
+- **Basic organoid formation**: Fundamental cell population dynamics
+- **Basement membrane stiffness effects**: Comparison of low vs. high stiffness
+- **Cell factory properties**: Validation of cell creation and property assignment
+- **Integrated force testing**: Complete simulation with basement membrane forces
+
+### Visualization System
+- **Static plots**: Cell positions colored by age at specific time points
+- **Animations**: Dynamic visualization of organoid formation process
+- **Comparison figures**: Side-by-side analysis of different scenarios
+- **Time series**: Evolution of morphology over simulation time
+
+## Quick Start
+
+### Building the Project
+```bash
+cd /home/orlando/Thesis
+make TestOrganoidFormation
+```
+
+### Running Tests
+```bash
+./projects/TissueMorphology/test/TestOrganoidFormation
+```
+
+### Creating Visualizations
+```bash
+cd /home/orlando/Thesis/Chaste/projects/TissueMorphology
+python3 create_visualizations.py
+```
+
+## Generated Output
+
+### Test Results
+- All tests pass with "OK!" status
+- Output files in `/home/orlando/Thesis/testoutput/OrganoidFormation/`
+- VTK-compatible data for external visualization tools
+
+### Visualization Files
+- `organoid_comparison.png`: Multi-scenario comparison
+- `organoid_time_series.png`: Temporal evolution analysis  
+- `organoid_formation.gif`: Animated formation process
+- Individual scenario plots for detailed analysis
+
+## Scientific Applications
+
+This project provides a foundation for studying:
+- **Organoid morphogenesis**: How basement membrane properties affect tissue organization
+- **Cell migration patterns**: Dynamic analysis of cell movement during development
+- **Mechanical constraints**: Role of basement membrane forces in tissue architecture
+- **Parameter sensitivity**: Effects of varying basement membrane stiffness on outcomes
+
+## Dependencies
+
+### Chaste Framework
+- Chaste 2024.2 or compatible version
+- cell_based components for cell population modeling
+- VTK support for visualization output
+
+### Python Visualization
+- Python 3 with matplotlib and numpy
+- PIL for animation generation
+- Standard libraries for data processing
+
+## Documentation
+
+See `VISUALIZATION_GUIDE.md` for detailed visualization system documentation including:
+- Complete usage instructions
+- Scientific interpretation of results  
+- Customization options
+- Technical implementation details
+
+## Contact
+
+This project is part of ongoing computational biology research using the Chaste framework for tissue morphology studies.
