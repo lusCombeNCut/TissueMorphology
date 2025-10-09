@@ -39,6 +39,7 @@ where:
 - $\hat{r}_i$ is the unit radial vector from center to cell $i$
 
 Cell dynamics follow the overdamped equation:
+
 $$\eta {d\vec{r}_i \over dt} = \vec{F}_{spring}(i) + \vec{F}_{BM}(i) + \vec{F}_{random}(i)$$
 
 #### Key Assumptions
