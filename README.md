@@ -25,6 +25,29 @@ TissueMorphology/
 - **BasementMembraneForce**: Applies radial constraints simulating basement membrane effects
 - **Cell-based simulations**: Uses Chaste's MeshBasedCellPopulation framework
 
+#### Mathematical Framework
+
+The basement membrane force is modeled as a radial constraint:
+
+$$\vec{F}_{BM}(i) = -k_{BM} \cdot \max(0, |\vec{r}_i - \vec{r}_{center}| - R_0) \cdot \hat{r}_i$$
+
+where:
+- $k_{BM}$ is the basement membrane stiffness parameter
+- $\vec{r}_i$ is the position of cell $i$
+- $\vec{r}_{center}$ is the organoid center (updated dynamically)
+- $R_0$ is the baseline organoid radius
+- $\hat{r}_i$ is the unit radial vector from center to cell $i$
+
+Cell dynamics follow the overdamped equation:
+$$\eta \frac{d\vec{r}_i}{dt} = \vec{F}_{spring}(i) + \vec{F}_{BM}(i) + \vec{F}_{random}(i)$$
+
+#### Key Assumptions
+- Cells behave as point masses in 2D
+- Basement membrane provides purely radial constraints
+- Cell-cell interactions via generalized linear springs
+- Overdamped dynamics (no inertial effects)
+- Stochastic cell division and aging processes
+
 ### Test Suite  
 - **Basic organoid formation**: Fundamental cell population dynamics
 - **Basement membrane stiffness effects**: Comparison of low vs. high stiffness
