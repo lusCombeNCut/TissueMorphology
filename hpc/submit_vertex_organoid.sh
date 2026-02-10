@@ -90,6 +90,10 @@ apptainer exec \
 
 EXIT_CODE=$?
 
+# Prepare archive name
+ARCHIVE_NAME="vertex_organoid_${TIMESTAMP}_job${SLURM_JOB_ID}.tar.gz"
+ARCHIVE_PATH="/user/work/$(whoami)/chaste_output/${ARCHIVE_NAME}"
+
 # ---------- Summary ----------
 echo ""
 echo "============================================"
@@ -98,6 +102,7 @@ echo "  Exit Code:     ${EXIT_CODE}"
 echo "  End Time:      $(date)"
 echo "  Output Dir:    ${OUTPUT_DIR}"
 echo "  Log File:      ${LOG_FILE}"
+echo "  Archive:       ${ARCHIVE_PATH}"
 echo "============================================"
 
 # List output files
@@ -105,6 +110,19 @@ if [ -d "${OUTPUT_DIR}" ]; then
     echo ""
     echo "Output files:"
     find "${OUTPUT_DIR}" -type f | head -50
+    
+    # Compress output directory for faster transfer
+    echo ""
+    echo "Compressing output directory..."
+    
+    tar -czf "${ARCHIVE_PATH}" -C "$(dirname ${OUTPUT_DIR})" "$(basename ${OUTPUT_DIR})"
+    
+    ARCHIVE_SIZE=$(du -h "${ARCHIVE_PATH}" | cut -f1)
+    echo "  Created: ${ARCHIVE_PATH}"
+    echo "  Size: ${ARCHIVE_SIZE}"
+    echo ""
+    echo "  To copy to local machine:"
+    echo "    scp sv22482@bp1-login.acrc.bris.ac.uk:${ARCHIVE_PATH} ./"
 fi
 
 # Clean up temporary directory

@@ -132,7 +132,21 @@ ls -lh /user/work/$USER/chaste_output/             # Check output files
 **Output organization:**
 - Log files: `/user/work/$USER/logs/vertex_organoid_YYYY-MM-DD_HH-MM-SS_jobID.log`
 - Simulation output: `/user/work/$USER/chaste_output/vertex_organoid_YYYY-MM-DD_HH-MM-SS_jobID/`
+- Compressed archives: `/user/work/$USER/chaste_output/vertex_organoid_YYYY-MM-DD_HH-MM-SS_jobID.tar.gz`
 - All output is timestamped for easy tracking of multiple runs
+- Archives are automatically created for faster transfer to local machine
+
+**Copy results to local machine:**
+```bash
+# Copy compressed archive (recommended - much faster)
+scp sv22482@bp1-login.acrc.bris.ac.uk:/user/work/sv22482/chaste_output/vertex_organoid_*.tar.gz ./
+
+# Extract locally
+tar -xzf vertex_organoid_*.tar.gz
+
+# Or copy uncompressed directory
+scp -r sv22482@bp1-login.acrc.bris.ac.uk:/user/work/sv22482/chaste_output/vertex_organoid_2026-02-10_14-30-45_job12345 ./
+```
 
 ## Updating workflow
 
