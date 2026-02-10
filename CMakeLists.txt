@@ -45,6 +45,32 @@
 # Here we just depend on core components (nothing application-specific).
 find_package(Chaste COMPONENTS cell_based crypt)
 
+# OrganoidChaste provides the 3D vertex model (MonolayerVertexBasedCellPopulation,
+# FiniteThicknessSimulation3d, SurfaceTensionForce, etc.)
+# Required for the vertex-based organoid simulation (Test3dVertexCryptOrganoid)
+find_package(CGAL)
+
+# Add OrganoidChaste include directories BEFORE chaste_do_project()
+# so they are available when test targets are created
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_mesh")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_population")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_population/forces")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_population/forces/sub_forces")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_population/cell_writers")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_population/face_writers")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_population/population_writers")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_population/boundary_conditions")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_population/moving_boundary_conditions")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_population/moving_boundary_conditions/move_profiles")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_population/division_rule")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_population/cell_property_mutations")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_simulation")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_simulation/modifiers")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste/src/monolayer_common")
+endif()
+
 # Alternatively, to specify a Chaste installation directory use a line like that below.
 # This is needed if your project is not contained in the projects folder within a Chaste source tree.
 #find_package(Chaste COMPONENTS heart crypt PATHS /path/to/chaste-install NO_DEFAULT_PATH)
@@ -52,3 +78,10 @@ find_package(Chaste COMPONENTS cell_based crypt)
 # Change the project name in the line below to match the folder this file is in,
 # i.e. the name of your project.
 chaste_do_project(TissueMorphology)
+
+# Link against OrganoidChaste library AFTER chaste_do_project()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../OrganoidChaste")
+    if (BUILD_SHARED_LIBS)
+        target_link_libraries(chaste_project_TissueMorphology LINK_PUBLIC chaste_project_OrganoidChaste)
+    endif()
+endif()

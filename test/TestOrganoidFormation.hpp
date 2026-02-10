@@ -234,8 +234,8 @@ public:
      */
     void TestOrganoidWithBasementMembraneForce()
     {
-        // Create a 2D hexagonal mesh 
-        HoneycombMeshGenerator generator(5, 5, 0);
+        // Create a larger 2D hexagonal mesh to get ~100 cells
+        HoneycombMeshGenerator generator(10, 10, 0);
         boost::shared_ptr<MutableMesh<2,2> > p_mesh = generator.GetMesh();
         
         // Create cells using the organoid cell factory
@@ -254,8 +254,8 @@ public:
         OffLatticeSimulation<2> simulator(cell_population);
         simulator.SetOutputDirectory("OrganoidFormation/WithBasementMembrane");
         simulator.SetDt(0.01);  // Smaller time step for basement membrane forces
-        simulator.SetSamplingTimestepMultiple(5);  // More frequent output for visualization
-        simulator.SetEndTime(0.2);  // Shorter simulation for demo
+        simulator.SetSamplingTimestepMultiple(1);  // Output every timestep for 100 timesteps
+        simulator.SetEndTime(1.0);  // 100 timesteps (1.0 / 0.01 = 100)
         
         // Add spring forces between neighbors
         MAKE_PTR(GeneralisedLinearSpringForce<2>, p_spring_force);
@@ -271,12 +271,12 @@ public:
         simulator.Solve();
         
         // Basic checks
-        TS_ASSERT_EQUALS(cell_population.GetNumRealCells(), 25u);  // Should have 25 cells (5x5 mesh)
+        TS_ASSERT_EQUALS(cell_population.GetNumRealCells(), 101u);  // Should have 101 cells (10x10 honeycomb mesh)
         // Simulation completed successfully if no exceptions thrown
         
         // Check that organoid center is reasonable
         c_vector<double, 2> center = p_basement_force->GetOrganoidCenter();
-        TS_ASSERT(norm_2(center) < 10.0); // Should be reasonably centered
+        TS_ASSERT(norm_2(center) < 20.0); // Should be reasonably centered (larger organoid)
     }
 };
 

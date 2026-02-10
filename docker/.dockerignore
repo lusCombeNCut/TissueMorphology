@@ -1,0 +1,37 @@
+# =============================================================================
+# .dockerignore — Keep the build context small
+# Build context = Chaste/projects/ (contains OrganoidChaste/ & TissueMorphology/)
+# Only C++ source, test, and CMake files are needed for compilation.
+# =============================================================================
+
+# Exclude everything not in OrganoidChaste or TissueMorphology
+README
+.gitignore
+
+# ---- Git metadata (saves ~100MB+ per project) ----
+**/.git/
+
+# ---- Python / caches ----
+**/__pycache__/
+**/*.pyc
+**/*.py
+
+# ---- Generated output directories ----
+**/visualization_output/
+**/invasion_analysis_output/
+**/ecm_comparison_output/
+**/test/Testing/
+
+# ---- Shell scripts, docs, Docker files (not needed for C++ build) ----
+**/*.sh
+**/*.md
+**/*.tex
+**/docker/
+**/hpc/
+**/scripts/
+**/visualization/
+**/docs/
+
+# ---- IDE / project files ----
+**/.project
+**/.vscode/

@@ -70,11 +70,26 @@ make TestOrganoidFormation
 ```
 
 ### Running Tests
+
+**2D Organoid Tests (Basic validation):**
 ```bash
 ./projects/TissueMorphology/test/TestOrganoidFormation
 ```
 
+**3D Organoid Tests (Full simulations):**
+```bash
+./projects/TissueMorphology/test/Test3dOrganoidFormation
+```
+
 ### Creating Visualizations
+
+**3D Organoid Visualization:**
+```bash
+cd /home/orlando/Thesis
+python3 organoid_viewer_clean.py LongTermDevelopment
+```
+
+**2D Organoid Analysis:**
 ```bash
 cd /home/orlando/Thesis/Chaste/projects/TissueMorphology
 python3 create_visualizations.py
@@ -83,9 +98,17 @@ python3 create_visualizations.py
 ## Generated Output
 
 ### Test Results
-- All tests pass with "OK!" status
-- Output files in `/home/orlando/Thesis/testoutput/OrganoidFormation/`
-- VTK-compatible data for external visualization tools
+
+**2D Tests (`TestOrganoidFormation`):**
+- Output: `/home/orlando/Thesis/testoutput/OrganoidFormation/`
+- 4 scenarios: BasicTest, LowStiffness, HighStiffness, WithBasementMembrane
+- Quick validation tests (0.2 time units, ~3 timesteps)
+
+**3D Tests (`Test3dOrganoidFormation`):**
+- Output: `/home/orlando/Thesis/testoutput/Organoid3d/`
+- 3 scenarios: SphericalFormation, StiffnessTest, LongTermDevelopment
+- Long simulations (20 time units, ~21 timesteps with VTU files)
+- Rich 3D visualization data with basement membrane effects
 
 ### Visualization Files
 - `organoid_comparison.png`: Multi-scenario comparison

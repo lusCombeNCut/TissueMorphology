@@ -41,6 +41,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "AbstractForce.hpp"
 #include "AbstractCellPopulation.hpp"
+#include "SimulationTime.hpp"
 
 /**
  * A force class to model basement membrane interactions in organoid formation.
@@ -63,8 +64,20 @@ private:
     /** The radius beyond which basement membrane forces apply */
     double mBasementMembraneRadius;
 
+    /** Initial basement membrane radius (for degradation calculations) */
+    double mInitialRadius;
+
     /** Default force strength */
     double mForceStrength;
+
+    /** ECM degradation rate (radius increase per unit time) */
+    double mEcmDegradationRate;
+
+    /** Maximum basement membrane radius (biological limit) */
+    double mMaxRadius;
+
+    /** Whether ECM degradation is enabled */
+    bool mEcmDegradationEnabled;
 
     /**
      * Boost Serialization method for archiving/checkpointing.
@@ -79,7 +92,11 @@ private:
         archive & boost::serialization::base_object<AbstractForce<DIM> >(*this);
         archive & mOrganoidCenter;
         archive & mBasementMembraneRadius;
+        archive & mInitialRadius;
         archive & mForceStrength;
+        archive & mEcmDegradationRate;
+        archive & mMaxRadius;
+        archive & mEcmDegradationEnabled;
     }
 
 public:
@@ -90,7 +107,11 @@ public:
     BasementMembraneForce()
         : AbstractForce<DIM>(),
           mBasementMembraneRadius(2.0),
-          mForceStrength(1.0)
+          mInitialRadius(2.0),
+          mForceStrength(1.0),
+          mEcmDegradationRate(0.1),  // Default: 0.1 radius units per time unit
+          mMaxRadius(10.0),          // Default: 5x initial radius max
+          mEcmDegradationEnabled(false)
     {
         // Initialize center to origin
         for (unsigned i = 0; i < DIM; i++)
@@ -115,6 +136,9 @@ public:
     {
         // Update organoid center based on current cell positions
         UpdateOrganoidCenter(rCellPopulation);
+        
+        // Update basement membrane radius due to ECM degradation
+        UpdateBasementMembraneRadius();
 
         // Apply basement membrane forces to cells outside the radius
         for (typename AbstractCellPopulation<DIM>::Iterator cell_iter = rCellPopulation.Begin();
@@ -235,6 +259,97 @@ public:
     }
 
     /**
+     * Set target radius (convenience method for 3D organoid studies).
+     *
+     * @param targetRadius the target organoid radius
+     */
+    void SetTargetRadius(double targetRadius)
+    {
+        SetBasementMembraneRadius(targetRadius);
+    }
+    
+    /**
+     * Set basement membrane parameter (alias for force strength).
+     *
+     * @param parameter the basement membrane stiffness parameter
+     */
+    void SetBasementMembraneParameter(double parameter)
+    {
+        mForceStrength = parameter;
+    }
+
+    /**
+     * Enable ECM degradation with specified rate.
+     *
+     * @param degradationRate rate of radius increase per unit time
+     * @param maxRadius maximum allowed radius (prevents infinite expansion)
+     */
+    void EnableEcmDegradation(double degradationRate = 0.1, double maxRadius = 10.0)
+    {
+        mEcmDegradationEnabled = true;
+        mEcmDegradationRate = degradationRate;
+        mMaxRadius = maxRadius;
+        mInitialRadius = mBasementMembraneRadius;  // Store initial value
+    }
+
+    /**
+     * Disable ECM degradation (radius remains constant).
+     */
+    void DisableEcmDegradation()
+    {
+        mEcmDegradationEnabled = false;
+    }
+
+    /**
+     * Update basement membrane radius due to ECM degradation.
+     * Called each timestep if degradation is enabled.
+     */
+    void UpdateBasementMembraneRadius()
+    {
+        if (mEcmDegradationEnabled)
+        {
+            // Get current simulation time
+            double current_time = SimulationTime::Instance()->GetTime();
+            
+            // Calculate new radius: R(t) = R_0 + rate * t
+            double new_radius = mInitialRadius + mEcmDegradationRate * current_time;
+            
+            // Clamp to maximum radius
+            mBasementMembraneRadius = std::min(new_radius, mMaxRadius);
+        }
+    }
+
+    /**
+     * Get ECM degradation rate.
+     *
+     * @return the current degradation rate
+     */
+    double GetEcmDegradationRate() const
+    {
+        return mEcmDegradationRate;
+    }
+
+    /**
+     * Get maximum radius.
+     *
+     * @return the maximum allowed radius
+     */
+    double GetMaxRadius() const
+    {
+        return mMaxRadius;
+    }
+
+    /**
+     * Check if ECM degradation is enabled.
+     *
+     * @return true if degradation is active
+     */
+    bool IsEcmDegradationEnabled() const
+    {
+        return mEcmDegradationEnabled;
+    }
+
+    /**
      * Overridden OutputForceParameters() method.
      *
      * @param rParamsFile the file stream to which the parameters are output
@@ -242,7 +357,11 @@ public:
     void OutputForceParameters(out_stream& rParamsFile)
     {
         *rParamsFile << "\t\t\t<BasementMembraneRadius>" << mBasementMembraneRadius << "</BasementMembraneRadius>\n";
+        *rParamsFile << "\t\t\t<InitialRadius>" << mInitialRadius << "</InitialRadius>\n";
         *rParamsFile << "\t\t\t<ForceStrength>" << mForceStrength << "</ForceStrength>\n";
+        *rParamsFile << "\t\t\t<EcmDegradationRate>" << mEcmDegradationRate << "</EcmDegradationRate>\n";
+        *rParamsFile << "\t\t\t<MaxRadius>" << mMaxRadius << "</MaxRadius>\n";
+        *rParamsFile << "\t\t\t<EcmDegradationEnabled>" << mEcmDegradationEnabled << "</EcmDegradationEnabled>\n";
 
         // Call method on direct parent class
         AbstractForce<DIM>::OutputForceParameters(rParamsFile);

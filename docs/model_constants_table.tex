@@ -1,0 +1,48 @@
+\begin{table}[h]
+\centering
+\caption{Model Constants and Parameters Used in Implementation}
+\label{tab:model_constants}
+\begin{tabular}{llll}
+\hline
+\textbf{Symbol} & \textbf{Parameter Name} & \textbf{Value} & \textbf{Units/Range} \\
+\hline
+\multicolumn{4}{l}{\textit{Model Variables}} \\
+$\mathbf{v}_{\text{loc}}$ & Locomotive Velocity Vector & -- & $\mu$m/min \\
+$s_{\text{cell}}$ & Cell Speed & calculated & $\mu$m/min \\
+$\mathbf{d}_{\text{actual}}$ & Actual Motility Direction Vector & calculated & unit vector \\
+\hline
+\multicolumn{4}{l}{\textit{ECM Structure Variables}} \\
+$\rho$ & Local ECM Density & 0--1 & volume fraction \\
+$\mathbf{f}$ & Average Local ECM Fibre Orientation Vector & calculated & unit vector \\
+$a(\mathbf{x}_i^*)$ & Local Anisotropy of ECM Alignment & 0.3--1.0 & dimensionless \\
+$\mathbf{d}_\perp$ & Unit Vector Perpendicular to Fibre & calculated & unit vector \\
+\hline
+\multicolumn{4}{l}{\textit{Governing Constants}} \\
+$\gamma$ & Effective ECM Influence Parameter & 1.0 & dimensionless [0--1] \\
+$C_1, C_2$ & Cell Direction Preference Parameters & $a(\mathbf{x}_i^*)$ & dimensionless \\
+$s_i$ & Cell's Specific ECM Sensitivity & 1.0 & dimensionless [0--1] \\
+$S_{\text{max}}$ & Maximum Cell Migration Speed & 1.25 & $\mu$m/min \\
+$\rho_{\text{ideal}}$ & Ideal Density & 1.0 & volume fraction \\
+$\rho_l$ & Lower Density Threshold & 0.0 & volume fraction \\
+$\rho_h$ & Upper Density Threshold & not implemented & volume fraction \\
+\hline
+\multicolumn{4}{l}{\textit{ECM Remodeling Parameters}} \\
+-- & ECM Remodeling Rate & 0.05 & per unit time \\
+-- & ECM Degradation Rate & 0.001 & per unit time \\
+-- & ECM Deposition Rate & 0.0005 & per unit time \\
+-- & Perpendicular Mobility Factor & 0.3 & dimensionless \\
+-- & Random Mobility Factor & 0.5 & dimensionless \\
+-- & ECM Diffusion Coefficient & 0.01 & dimensionless \\
+\hline
+\multicolumn{4}{l}{\textit{Spatial Grid Parameters}} \\
+-- & Grid Spacing & 12.5 & $\mu$m \\
+-- & Domain Width & 600 & $\mu$m \\
+-- & Domain Height & 1000 & $\mu$m \\
+\hline
+\multicolumn{4}{l}{\textit{Simulation Parameters}} \\
+-- & Time Step ($\Delta t$) & 2 & minutes \\
+-- & Simulation End Time & 7200 & minutes (5 days) \\
+-- & Output Sampling Interval & 1440 timesteps & (2 days) \\
+\hline
+\end{tabular}
+\end{table}

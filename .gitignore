@@ -1,2 +1,24 @@
-build/
+# =============================================================================
+# .gitignore — TissueMorphology project
+# =============================================================================
 
+# ---- Build artifacts ----
+build/
+test/Testing/
+
+# ---- Python caches ----
+__pycache__/
+*.pyc
+*.pyo
+
+# ---- Generated output (large, should not be committed) ----
+visualization_output/
+invasion_analysis_output/
+ecm_comparison_output/
+*.log
+
+# ---- IDE / editor files ----
+.vscode/
+*.swp
+*.swo
+*~

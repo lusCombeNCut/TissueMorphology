@@ -1,0 +1,349 @@
+\section{Computational Modeling Techniques}
+
+Existing computational models for organoids are predominantly grouped into two categories, continuum models and cell-based models (CBMs). Continuum approaches treat the tissue as a continuous material, using differential equations to describe large-scale events like molecular diffusion or fluid flow. Conversely, CBMs capture individual cell-level mechanics. Common CMBs such as Vertex Models and Node-Based Models represent cells as distinct entities with defined interactions, allowing for numerical simulation of forces, adhesion, and morphogenesis \cite{Tanida2025}. 
+
+CBMs often use simple ECM models, representing its mechanical influence as an isotropic stiffness parameter or external pressure resisting organoid expansion \cite{Fletcher2014}. However, more sophisticated models incorporate the ECM explicitly, with a continuous domain surrounding the cells \cite{Zeng2006}. This domain is defined by constitutive mechanical laws (e.g., linear elasticity or viscoelasticity), enabling the model to calculate reciprocal Cell-ECM interactions. For example, cell-generated traction forces deform the matrix, and the matrix resistance simultaneously constrains the organoid's morphology.
+
+During the development of the computational model in this project thus far, the following key constitutive equations and dynamics have been used.
+
+\subsection{Off-Lattice Node-Based Model}
+
+% Based on: Meineke et al. 2001, Drasdo et al. 2005
+% CHASTE classes: GeneralisedLinearSpringForce, OffLatticeSimulation
+
+\paragraph{Cell-Cell Spring Forces}
+The total force acting on cell $i$ from all neighbouring cells $j$:
+
+\begin{equation}
+    \mathbf{F}_i = \sum_{j \in \text{neighbors}(i)} \mu (\left| \mathbf{r}_{i,j} \right| - l_{i,j}^0) \mathbf{\hat{r}}_{i,j}(t)
+    \label{eq:spring_force}
+\end{equation}
+
+\begin{itemize}
+    \item $\mu$ = spring constant (stiffness)
+    \item $\mathbf{r}_{i,j}$ = vector from cell $i$ to cell $j$
+    \item $\mathbf{\hat{r}}_{i,j}(t)$ = unit vector in direction from $i$ to $j$
+    \item $l_{i,j}^0$ = equilibrium spring length (rest length)
+    \item \textbf{Origin:} Meineke et al., 2001 \cite{Meineke2001}
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
+
+\paragraph{Overdamped Motion}
+Friction-dominated displacement in small time interval $\Delta t$:
+
+\begin{equation}
+    \Delta \mathbf{r}_i = \frac{\Delta t}{\eta} \mathbf{F}_i
+    \label{eq:overdamped}
+\end{equation}
+
+\begin{itemize}
+    \item $\mathbf{r}_i$ = position vector of cell center $i$
+    \item $\eta$ = damping constant (drag coefficient)
+    \item Assumes low Reynolds number, inertia negligible
+    \item \textbf{Origin:} Drasdo et al., 2005 \cite{Drasdo2005}
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
+
+\paragraph{Neighbour Detection}
+\begin{itemize}
+    \item After each displacement step, Delaunay triangulation is re-evaluated to determine cell neighbors
+    \item Cutoff distance typically set to maximum interaction range (e.g., 50 μm)
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
+
+\subsection{Differential Adhesion Force}
+
+% Based on: Differential Adhesion Hypothesis (Steinberg, 1963), implemented as extension of GeneralisedLinearSpringForce
+
+\paragraph{Type-Dependent Spring Constant}
+The spring constant $\mu$ in Equation \ref{eq:spring_force} varies based on cell types:
+
+\begin{equation}
+    \mu_{ij} = \begin{cases}
+        \mu_{\text{apical-apical}} & \text{if cells } i, j \text{ both apical} \\
+        \mu_{\text{basal-basal}} & \text{if cells } i, j \text{ both basal} \\
+        \mu_{\text{apical-basal}} & \text{if cells } i, j \text{ are different types}
+    \end{cases}
+    \label{eq:differential_adhesion}
+\end{equation}
+
+\begin{itemize}
+    \item Typically: $\mu_{\text{apical-apical}} = \mu_{\text{basal-basal}} > \mu_{\text{apical-basal}}$
+    \item Weaker heterotypic adhesion drives cell sorting and layer stratification
+    \item \textbf{Origin:} Differential Adhesion Hypothesis (Steinberg, 1963, 1970)
+    \item \textbf{Citation reference:} Steinberg MS (1963), "Reconstruction of tissues by dissociated cells"
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
+
+\subsection{Simple ECM Threshold Model}
+
+% Initial simple implementation - ECM as binary yes/no force
+
+\paragraph{ECM Resistance Force}
+Initial implementation where ECM exerts force only when cell reaches threshold depth:
+
+\begin{equation}
+    \mathbf{F}_{\text{ECM}, i} = \begin{cases}
+        -k_{\text{ECM}} (y_i - y_{\text{threshold}}) \mathbf{\hat{y}} & \text{if } y_i > y_{\text{threshold}} \\
+        \mathbf{0} & \text{otherwise}
+    \end{cases}
+    \label{eq:ecm_threshold}
+\end{equation}
+
+\begin{itemize}
+    \item $k_{\text{ECM}}$ = ECM stiffness parameter
+    \item $y_i$ = y-coordinate of cell $i$ (invasion depth)
+    \item $y_{\text{threshold}}$ = threshold depth where ECM resistance begins
+    \item $\mathbf{\hat{y}}$ = unit vector in y-direction (opposing invasion)
+    \item \textbf{Limitations:}
+    \begin{itemize}
+        \item Binary on/off behavior
+        \item No spatial variation in ECM properties
+        \item No ECM fiber orientation
+        \item Isotropic resistance
+    \end{itemize}
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
+
+\subsection{Dynamic ECM Agent-Based Grid Model}
+
+% Based on: Painter 2009, Metzcar et al. 2025
+% Implements spatially-resolved ECM with fiber orientation, degradation, and remodeling
+
+\paragraph{ECM Grid Representation}
+ECM properties stored on spatial grid with spacing $\Delta x$ (typically 25 μm):
+
+\begin{itemize}
+    \item Each grid point $(i,j)$ stores:
+    \begin{itemize}
+        \item $\theta_{ij}$ = fiber orientation angle (radians)
+        \item $\rho_{ij}$ = ECM density $\in [0, 1]$
+        \item $\alpha_{ij}$ = anisotropy (fiber alignment) $\in [0, 1]$
+    \end{itemize}
+    \item Bilinear interpolation between grid points for smooth fields
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
+
+\paragraph{Contact Guidance Force}
+Cell migration guided by ECM fiber orientation:
+
+\begin{equation}
+    \mathbf{F}_{\text{guidance}, i} = v_0 \cdot s \cdot \sqrt{\rho(\mathbf{r}_i)} \cdot \mathbf{\hat{n}}_{\text{migration}}
+    \label{eq:contact_guidance}
+\end{equation}
+
+where the migration direction is:
+
+\begin{equation}
+    \mathbf{\hat{n}}_{\text{migration}} = \frac{\alpha \rho \mathbf{\hat{f}} + (1-\alpha\rho) \cdot 0.3 \mathbf{\hat{f}}_\perp + (1-\alpha\rho) \cdot 0.5 \mathbf{\hat{r}}}{\|\cdot\|}
+    \label{eq:migration_direction}
+\end{equation}
+
+\begin{itemize}
+    \item $v_0$ = base cell speed (μm/min), typically 1.25 μm/min
+    \item $s$ = ECM sensitivity parameter (0-1+), default 1.0
+    \item $\rho(\mathbf{r}_i)$ = interpolated ECM density at cell position
+    \item $\mathbf{\hat{f}}$ = ECM fiber direction unit vector: $(\cos\theta, \sin\theta)$
+    \item $\mathbf{\hat{f}}_\perp$ = perpendicular direction: $(-\sin\theta, \cos\theta)$
+    \item $\mathbf{\hat{r}}$ = random direction (updated each timestep)
+    \item $\alpha$ = anisotropy parameter (1 = fully aligned, 0 = random)
+    \item $\rho$ = local ECM density
+    \item \textbf{Origin:} Contact guidance concept from Painter 2009; three-factor model from Metzcar et al. 2025
+    \item \textbf{Citation references:}
+    \begin{itemize}
+        \item Painter KJ (2009), "Modelling cell migration strategies in the extracellular matrix"
+        \item Metzcar et al. (2025), "Three factors are sufficient to recapitulate heterogeneous cell invasion patterns"
+    \end{itemize}
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
+
+\paragraph{ECM Degradation}
+Cells degrade ECM through matrix metalloproteinases (MMPs):
+
+\begin{equation}
+    \frac{\partial \rho_{ij}}{\partial t} = -k_{\text{deg}} \sum_{k \in \text{cells near } (i,j)} \delta(\mathbf{r}_k - \mathbf{r}_{ij})
+    \label{eq:ecm_degradation}
+\end{equation}
+
+\begin{itemize}
+    \item $k_{\text{deg}}$ = degradation rate constant (default 0.001 min$^{-1}$)
+    \item $\delta(\mathbf{r}_k - \mathbf{r}_{ij})$ = indicator function (1 if cell $k$ at grid point $(i,j)$, 0 otherwise)
+    \item Discrete implementation: $\rho_{ij}^{n+1} = \max(0, \rho_{ij}^n - k_{\text{deg}} \Delta t)$ if cell present
+    \item Density bounded: $\rho \in [0, 1]$
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
+
+\paragraph{ECM Remodeling (Traction-Induced)}
+Cells mechanically align ECM fibers through traction forces:
+
+\begin{equation}
+    \frac{\partial \theta_{ij}}{\partial t} = k_{\text{remodel}} \cdot \min\left(1, \frac{\|\mathbf{F}_k\|}{F_{\text{ref}}}\right) \cdot \sin(\theta_{\text{cell}} - \theta_{ij})
+    \label{eq:ecm_remodeling}
+\end{equation}
+
+\begin{itemize}
+    \item $k_{\text{remodel}}$ = remodeling rate constant (default 0.05 min$^{-1}$)
+    \item $\mathbf{F}_k$ = traction force from cell $k$ (from Equation \ref{eq:contact_guidance})
+    \item $F_{\text{ref}}$ = reference force for normalization (typically 10 μm/min)
+    \item $\theta_{\text{cell}}$ = cell migration direction angle
+    \item $\theta_{ij}$ = current ECM fiber angle at grid point
+    \item Stronger forces cause faster ECM realignment
+    \item \textbf{Origin:} Traction-mediated ECM remodeling (cell contractility)
+    \item \textbf{Citation reference:} Ma et al. (2013), "Fibers in the ECM enable long-range stress transmission between cells"
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
+
+\paragraph{ECM Diffusion (Smoothing)}
+Spatial diffusion to prevent sharp discontinuities:
+
+\begin{equation}
+    \frac{\partial \theta_{ij}}{\partial t}\bigg|_{\text{diff}} = D \nabla^2 \theta_{ij}
+    \label{eq:ecm_diffusion}
+\end{equation}
+
+\begin{itemize}
+    \item $D$ = diffusion coefficient for ECM properties (default 0.01)
+    \item Discrete implementation using 4-neighbor stencil
+    \item Applied to fiber orientation using circular averaging (angular diffusion)
+    \item Also applied to density: $\partial \rho_{ij}/\partial t = D \nabla^2 \rho_{ij}$
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
+
+\paragraph{Bidirectional Fiber Movement}
+\begin{itemize}
+    \item Cells can move in either direction along fibers: $\pm \mathbf{\hat{f}}$
+    \item Direction chosen randomly each timestep with probability 0.5
+    \item Reflects biological reality of cells migrating along but not necessarily towards fiber end
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
+
+\subsection{Cell Cycle and Contact Inhibition}
+
+% ContactInhibitionCellCycleModel
+
+\paragraph{Contact-Inhibited Proliferation}
+Cell cycle progression depends on local crowding:
+
+\begin{equation}
+    \text{Proliferation rate} = \begin{cases}
+        r_{\text{max}} & \text{if } V_i > V_{\text{quiescent}} \\
+        0 & \text{otherwise}
+    \end{cases}
+    \label{eq:contact_inhibition}
+\end{equation}
+
+\begin{itemize}
+    \item $r_{\text{max}}$ = maximum proliferation rate (cell cycle duration)
+    \item $V_i$ = current cell volume (or effective area in 2D)
+    \item $V_{\text{quiescent}}$ = quiescent volume fraction threshold (typically 0.7 of equilibrium)
+    \item Cells enter quiescence (G0) when compressed below threshold
+    \item \textbf{Implementation:} ContactInhibitionCellCycleModel in CHASTE
+    \item \textbf{Typical cell cycle phases:}
+    \begin{itemize}
+        \item G1: 8-12 hours (contact-sensitive)
+        \item S: 5 hours
+        \item G2: 4 hours
+        \item M: 1 hour
+        \item Total: 18-22 hours
+    \end{itemize}
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
+
+\subsection{Summary of Key Parameters}
+
+\begin{table}[h]
+\centering
+\caption{Default parameter values used in simulations}
+\begin{tabular}{lll}
+\hline
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Default Value} \\
+\hline
+Spring constant & $\mu$ & 15.0 (dimensionless) \\
+Damping constant & $\eta$ & 1.0 hour$^{-1}$ \\
+Timestep & $\Delta t$ & 0.5 min \\
+Cell-cell adhesion & $\mu_{\text{same type}}$ & 0.4 \\
+Heterotypic adhesion & $\mu_{\text{diff type}}$ & 0.2 \\
+Base migration speed & $v_0$ & 1.25 μm/min \\
+ECM sensitivity & $s$ & 1.0 \\
+ECM degradation rate & $k_{\text{deg}}$ & 0.001 min$^{-1}$ \\
+ECM remodeling rate & $k_{\text{remodel}}$ & 0.05 min$^{-1}$ \\
+ECM diffusion coeff. & $D$ & 0.01 \\
+Grid spacing & $\Delta x$ & 25 μm \\
+Interaction cutoff & $r_{\text{cut}}$ & 50 μm \\
+\hline
+\end{tabular}
+\label{tab:parameters}
+\end{table}
+
+\subsection{Notes on Implementation}
+
+\begin{itemize}
+    \item All simulations performed using CHASTE (Cancer, Heart and Soft Tissue Environment)
+    \item Node-based cell populations with Delaunay triangulation for neighbor detection
+    \item Forward Euler time integration for cell positions
+    \item Periodic boundary conditions in x-direction for some simulations
+    \item Output frequency: every 120 timesteps (60 minutes simulation time)
+    \item Typical simulation duration: 2-4 days (2880-5760 minutes)
+    \item \textbf{Bullet points to fill:}
+    \begin{itemize}
+        \item []
+        \item []
+    \end{itemize}
+\end{itemize}
