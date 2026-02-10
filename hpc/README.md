@@ -166,17 +166,37 @@ sbatch hpc/submit_vertex_organoid.sh
 
 ## Key BluePebble-specific details
 
-- **Module loading required**: `module load apptainer/1.1.9`
+- **Module loading required**: `module load apptainer` (loads default version)
 - **Cache directory**: Set to `/user/work/$(whoami)/.apptainer` to avoid filling home directory
 - **Account code**: `semt036404` (already set in submit script)
 - **Apptainer command**: Use `apptainer` (not `singularity`)
 
 ## Troubleshooting
 
+**"The following module(s) are unknown: apptainer/X.X.X"**
+
+Check available versions and load the default:
+```bash
+module avail apptainer
+module load apptainer
+```
+
 **"apptainer: command not found"**
 ```bash
-module load apptainer/1.1.9
+module load apptainer
 ```
+
+**"Cannot create directory /home/chaste/build/Testing/Temporary"**
+
+This is fixed in the latest version of the submit script. Pull the latest changes:
+```bash
+cd ~/TissueMorphology
+git pull
+```
+
+**"UID: readonly variable" errors**
+
+The submit script has been updated to remove `--cleanenv` flag and properly bind writable directories for CTest. Make sure you're using the latest version.
 
 **"Permission denied" on cache directory**
 ```bash

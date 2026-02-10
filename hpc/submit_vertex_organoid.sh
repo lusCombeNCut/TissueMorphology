@@ -39,6 +39,10 @@ SIF_IMAGE="/user/work/$(whoami)/containers/tissuemorphology.sif"
 OUTPUT_DIR="/user/work/$(whoami)/chaste_output/vertex_organoid_${TIMESTAMP}_job${SLURM_JOB_ID}"
 mkdir -p "${OUTPUT_DIR}"
 
+# Create temporary directory for CTest
+TEMP_DIR="/user/work/$(whoami)/chaste_output/temp_${TIMESTAMP}_job${SLURM_JOB_ID}"
+mkdir -p "${TEMP_DIR}"
+
 # Log directory and files with timestamp
 LOG_DIR="/user/work/$(whoami)/logs"
 mkdir -p "${LOG_DIR}"
@@ -72,13 +76,15 @@ if [ ! -f "${SIF_IMAGE}" ]; then
 fi
 
 # ---------- Run the simulation ----------
-# --bind: mount host output directory into the container's test output path
-# --cleanenv: start with a clean environment (avoids host env contamination)
+# --bind: mount host directories into the container
+#   - Output directory for test results
+#   - Temp directory for CTest temporary files (writable)
 # --env: pass OpenMP thread count to match allocated CPUs
 apptainer exec \
-    --cleanenv \
     --bind "${OUTPUT_DIR}:/home/chaste/output" \
+    --bind "${TEMP_DIR}:/home/chaste/build/Testing/Temporary" \
     --env OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK} \
+    --env CHASTE_TEST_OUTPUT=/home/chaste/output \
     "${SIF_IMAGE}" \
     bash -c "cd /home/chaste/build && ctest -R Test3dVertexCryptOrganoid -V --output-on-failure"
 
@@ -100,5 +106,10 @@ if [ -d "${OUTPUT_DIR}" ]; then
     echo "Output files:"
     find "${OUTPUT_DIR}" -type f | head -50
 fi
+
+# Clean up temporary directory
+echo ""
+echo "Cleaning up temporary files..."
+rm -rf "${TEMP_DIR}"
 
 exit ${EXIT_CODE}
