@@ -18,6 +18,7 @@
 | **Container cache** | `/user/work/$USER/.apptainer/` | Scratch (large temp files during pull) |
 | **Container image** (`.sif`) | `/user/work/$USER/containers/` | Scratch (large, regeneratable) |
 | **Output data** | `/user/work/$USER/chaste_output/` | Scratch (large, fast I/O) |
+| **Job logs** | `/user/work/$USER/logs/` | Scratch (timestamped execution logs) |
 
 **Why scratch storage for containers?**
 - Home directory quota: **50 GB** (fills up fast with one container)
@@ -58,6 +59,7 @@ Create container directory:
 ```bash
 mkdir -p /user/work/$USER/containers
 mkdir -p /user/work/$USER/chaste_output
+mkdir -p /user/work/$USER/logs
 ```
 
 ### 2. Clone the TissueMorphology repository
@@ -73,7 +75,28 @@ Now you have all the scripts! When you make changes locally and push to GitHub, 
 git pull
 ```
 
-### 3. Pull the container image
+### 3. Authenticate with GitHub Container Registry
+
+**One-time authentication** (required to pull private container images):
+
+```bash
+apptainer remote login -u lusCombeNCut docker://ghcr.io
+```
+
+When prompted for password, enter your **GitHub Personal Access Token** (not GitHub password).
+
+**Create a PAT** (if you don't have one):
+1. Go to https://github.com/settings/tokens
+2. Click "Generate new token" → "Generate new token (classic)"
+3. Select scope: **`read:packages`** (required)
+4. Copy the token and paste when prompted
+
+**Verify authentication:**
+```bash
+apptainer remote status docker://ghcr.io
+```
+
+### 4. Pull the container image
 
 Run the setup script:
 ```bash
@@ -84,13 +107,14 @@ bash hpc/setup_hpc.sh
 This will:
 - Load Apptainer module
 - Set cache directory to scratch space (if not in `.bashrc`)
+- Check GHCR authentication
 - Pull the Docker image as a `.sif` file to `/user/work/$USER/containers/`
 - Verify the container
-- Create output directory
+- Create output and logs directories
 
 **First pull takes 10-30 minutes** (downloads ~5 GB, extracts to ~20 GB cache, creates ~10 GB .sif)
 
-### 4. Submit jobs
+### 5. Submit jobs
 
 ```bash
 cd ~/TissueMorphology
@@ -99,10 +123,16 @@ sbatch hpc/submit_vertex_organoid.sh
 
 Monitor:
 ```bash
-squeue -u $USER                    # Check job status
-tail -f organoid_<JOBID>.out       # Watch live output
-ls -lh /user/work/$USER/chaste_output/  # Check output files
+squeue -u $USER                                    # Check job status
+tail -f /user/work/$USER/logs/vertex_organoid_*.log  # Watch latest log
+ls -lht /user/work/$USER/logs/ | head              # List recent logs
+ls -lh /user/work/$USER/chaste_output/             # Check output files
 ```
+
+**Output organization:**
+- Log files: `/user/work/$USER/logs/vertex_organoid_YYYY-MM-DD_HH-MM-SS_jobID.log`
+- Simulation output: `/user/work/$USER/chaste_output/vertex_organoid_YYYY-MM-DD_HH-MM-SS_jobID/`
+- All output is timestamped for easy tracking of multiple runs
 
 ## Updating workflow
 

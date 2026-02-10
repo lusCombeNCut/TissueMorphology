@@ -21,22 +21,32 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
-#SBATCH --output=organoid_%j.out
-#SBATCH --error=organoid_%j.err
 
 # ---------- Load modules ----------
-module load apptainer/1.1.9
+module load apptainer
 
 # Set cache directory to scratch space
 export APPTAINER_CACHEDIR=/user/work/$(whoami)/.apptainer
 
 # ---------- Configuration ----------
+# Generate timestamp
+TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+
 # Path to the Apptainer/Singularity image file (in scratch space)
 SIF_IMAGE="/user/work/$(whoami)/containers/tissuemorphology.sif"
 
 # Output directory on the host (bind-mounted into the container)
-OUTPUT_DIR="/user/work/$(whoami)/chaste_output/vertex_organoid_${SLURM_JOB_ID}"
+OUTPUT_DIR="/user/work/$(whoami)/chaste_output/vertex_organoid_${TIMESTAMP}_job${SLURM_JOB_ID}"
 mkdir -p "${OUTPUT_DIR}"
+
+# Log directory and files with timestamp
+LOG_DIR="/user/work/$(whoami)/logs"
+mkdir -p "${LOG_DIR}"
+LOG_FILE="${LOG_DIR}/vertex_organoid_${TIMESTAMP}_job${SLURM_JOB_ID}.log"
+
+# Redirect all output to log file while also showing on screen
+exec > >(tee -a "${LOG_FILE}")
+exec 2>&1
 
 # ---------- Environment ----------
 echo "============================================"
@@ -46,9 +56,11 @@ echo "  Node:          $(hostname)"
 echo "  CPUs:          ${SLURM_CPUS_PER_TASK}"
 echo "  Memory:        ${SLURM_MEM_PER_NODE}MB"
 echo "  Account:       semt036404"
+echo "  Timestamp:     ${TIMESTAMP}"
 echo "  Start Time:    $(date)"
 echo "  SIF Image:     ${SIF_IMAGE}"
 echo "  Output Dir:    ${OUTPUT_DIR}"
+echo "  Log File:      ${LOG_FILE}"
 echo "============================================"
 
 # Verify the container image exists
@@ -78,7 +90,8 @@ echo "============================================"
 echo "  Job Complete"
 echo "  Exit Code:     ${EXIT_CODE}"
 echo "  End Time:      $(date)"
-echo "  Output:        ${OUTPUT_DIR}"
+echo "  Output Dir:    ${OUTPUT_DIR}"
+echo "  Log File:      ${LOG_FILE}"
 echo "============================================"
 
 # List output files
