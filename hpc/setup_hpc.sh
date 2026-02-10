@@ -33,28 +33,9 @@ mkdir -p "$CONTAINER_DIR"
 echo "Cache directory: $APPTAINER_CACHEDIR"
 echo "Container directory: $CONTAINER_DIR"
 
-# ---------- Check authentication ----------
-echo ""
-echo "[1/4] Checking GHCR authentication..."
-if ! apptainer remote status docker://ghcr.io &>/dev/null; then
-    echo ""
-    echo "⚠️  Authentication required for GitHub Container Registry"
-    echo ""
-    echo "Please run this command first:"
-    echo "  apptainer remote login -u lusCombeNCut docker://ghcr.io"
-    echo ""
-    echo "When prompted for password, use a GitHub Personal Access Token"
-    echo "with 'read:packages' permission."
-    echo ""
-    echo "Create token at: https://github.com/settings/tokens"
-    echo ""
-    exit 1
-fi
-echo "✓ Authenticated with GHCR"
-
 # ---------- Pull container image ----------
 echo ""
-echo "[2/4] Pulling container image..."
+echo "[1/3] Pulling container image..."
 echo "  Source: ${IMAGE}"
 echo "  Target: ${SIF_FILE}"
 echo ""
@@ -75,7 +56,7 @@ else
 fi
 
 echo ""
-echo "[3/4] Verifying container..."
+echo "[2/3] Verifying container..."
 apptainer exec "${SIF_FILE}" cat /etc/os-release | head -2
 echo ""
 apptainer exec "${SIF_FILE}" bash -c 'cd /home/chaste/build && ctest -N -R Test3dVertexCryptOrganoid' 2>/dev/null || \
@@ -83,7 +64,7 @@ apptainer exec "${SIF_FILE}" bash -c 'cd /home/chaste/build && ctest -N -R Test3
 
 # ---------- Create output and log directories ----------
 echo ""
-echo "[4/4] Creating output and log directories..."
+echo "[3/3] Creating output and log directories..."
 mkdir -p "/user/work/$(whoami)/chaste_output"
 mkdir -p "/user/work/$(whoami)/logs"
 
