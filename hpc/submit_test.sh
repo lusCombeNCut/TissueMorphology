@@ -114,19 +114,23 @@ echo ""
 
 # ---------- Build and run the simulation ----------
 # --bind: mount host directories into the container
-#   - Source directory to overlay the project in the container
+#   - Source directory to overlay the entire project (CMakeLists.txt, test files, src, etc.)
 #   - Output directory for test results
 #   - Temp directory for CTest temporary files (writable)
 # --env: pass OpenMP thread count to match allocated CPUs
-echo "Building and running ${TEST_NAME}..."
+#
+# The cmake step is needed to pick up new test files added to ContinuousTestPack.txt
+# This adds ~10-20 seconds but ensures new tests are discovered without rebuilding the image.
+echo "Configuring, building, and running ${TEST_NAME}..."
 apptainer exec \
+    --writable-tmpfs \
     --bind "${SOURCE_DIR}:/home/chaste/src/projects/TissueMorphology" \
     --bind "${OUTPUT_DIR}:/home/chaste/output" \
     --bind "${TEMP_DIR}:/home/chaste/build/Testing/Temporary" \
     --env OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK} \
     --env CHASTE_TEST_OUTPUT=/home/chaste/output \
     "${SIF_IMAGE}" \
-    bash -c "cd /home/chaste/build && make -j${SLURM_CPUS_PER_TASK} ${TEST_NAME} && ctest -R ${TEST_NAME} -V --output-on-failure"
+    bash -c "cd /home/chaste/build && cmake /home/chaste/src -DChaste_ERROR_ON_WARNING=OFF && make -j${SLURM_CPUS_PER_TASK} ${TEST_NAME} && ctest -R ${TEST_NAME} -V --output-on-failure"
 
 EXIT_CODE=$?
 
