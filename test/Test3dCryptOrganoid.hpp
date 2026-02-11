@@ -108,8 +108,85 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "DynamicECMField3d.hpp"
 #include "ECMFieldWriter3d.hpp"
 
+// For progress tracking
+#include "AbstractCellBasedSimulationModifier.hpp"
+#include <iomanip>
+
 // PETSc setup
 #include "PetscSetupAndFinalize.hpp"
+
+
+/**
+ * Custom simulation modifier for progress tracking
+ */
+template<unsigned DIM>
+class ProgressTrackingModifier : public AbstractCellBasedSimulationModifier<DIM>
+{
+private:
+    double mEndTime;
+    unsigned mUpdateInterval;
+    unsigned mLastUpdateStep;
+    
+public:
+    ProgressTrackingModifier(double endTime, unsigned updateInterval = 100)
+        : AbstractCellBasedSimulationModifier<DIM>(),
+          mEndTime(endTime),
+          mUpdateInterval(updateInterval),
+          mLastUpdateStep(0)
+    {
+    }
+    
+    virtual void UpdateAtEndOfTimeStep(AbstractCellPopulation<DIM,DIM>& rCellPopulation)
+    {
+        double current_time = SimulationTime::Instance()->GetTime();
+        unsigned current_step = SimulationTime::Instance()->GetTimeStepsElapsed();
+        
+        // Update progress every mUpdateInterval steps
+        if (current_step - mLastUpdateStep >= mUpdateInterval)
+        {
+            double percentage = (current_time / mEndTime) * 100.0;
+            unsigned num_cells = rCellPopulation.GetNumRealCells();
+            
+            // Create progress bar
+            int bar_width = 40;
+            int pos = static_cast<int>(bar_width * current_time / mEndTime);
+            
+            std::cout << "\r[";
+            for (int i = 0; i < bar_width; ++i)
+            {
+                if (i < pos) std::cout << "=";
+                else if (i == pos) std::cout << ">";
+                else std::cout << " ";
+            }
+            std::cout << "] " << std::fixed << std::setprecision(1) << percentage << "% "
+                      << "| Time: " << std::setprecision(2) << current_time << "/" << mEndTime << " hrs "
+                      << "| Cells: " << num_cells << std::flush;
+            
+            mLastUpdateStep = current_step;
+        }
+    }
+    
+    virtual void SetupSolve(AbstractCellPopulation<DIM,DIM>& rCellPopulation, std::string outputDirectory)
+    {
+        std::cout << "\nProgress:" << std::endl;
+    }
+    
+    virtual void UpdateAtEndOfSolve(AbstractCellPopulation<DIM,DIM>& rCellPopulation)
+    {
+        // Print final completed progress bar
+        std::cout << "\r[";
+        for (int i = 0; i < 40; ++i) std::cout << "=";
+        std::cout << "] 100.0% | Time: " << mEndTime << "/" << mEndTime << " hrs "
+                  << "| Cells: " << rCellPopulation.GetNumRealCells() << std::endl;
+    }
+    
+    virtual void OutputSimulationModifierParameters(out_stream& rParamsFile)
+    {
+        *rParamsFile << "\t\t<EndTime>" << mEndTime << "</EndTime>\n";
+        *rParamsFile << "\t\t<UpdateInterval>" << mUpdateInterval << "</UpdateInterval>\n";
+        AbstractCellBasedSimulationModifier<DIM>::OutputSimulationModifierParameters(rParamsFile);
+    }
+};
 
 
 class Test3dCryptOrganoid : public AbstractCellBasedTestSuite
@@ -308,7 +385,12 @@ public:
         
         // Add output writers
         cell_population.AddCellWriter<CellIdWriter>();
-        cell_population.AddCellWriter<CellAgesWriter>();
+        celProgress tracking modifier - updates every 100 timesteps
+        boost::shared_ptr<ProgressTrackingModifier<3>> p_progress_modifier(
+            new ProgressTrackingModifier<3>(end_time, 100));
+        simulator.AddSimulationModifier(p_progress_modifier);
+        
+        // l_population.AddCellWriter<CellAgesWriter>();
         cell_population.AddCellPopulationCountWriter<CellProliferativeTypesCountWriter>();
         
         // ================================================================
@@ -391,6 +473,8 @@ public:
         // 8. RUN SIMULATION
         // ================================================================
         
+        std::cout << "Progress update interval: every 100 timesteps (every " 
+                  << (100 * dt) << " hours)" << std::endl;
         std::cout << "\nStarting simulation..." << std::endl;
         std::cout << "End time: " << end_time << " hours (" << end_time / 24.0 << " days)" << std::endl;
         std::cout << "Timestep: " << dt << " hours" << std::endl;
