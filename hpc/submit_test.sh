@@ -5,6 +5,9 @@
 # Slurm job script for BluePebble HPC (ACRC, University of Bristol)
 # Runs a specified Chaste test via Apptainer (Singularity) container.
 #
+# Pulls the latest TissueMorphology source from GitHub and rebuilds
+# the test before running, so code changes are immediately reflected.
+#
 # Usage:
 #   sbatch submit_test.sh <TestName>
 #
@@ -14,7 +17,7 @@
 # Prerequisites:
 #   1. Pull the container image on the login node first:
 #      apptainer pull tissuemorphology.sif docker://ghcr.io/luscombencut/tissuemorphology:latest
-#   2. Place the .sif file in your home directory or project space
+#   2. Place the .sif file in your work directory containers folder
 # =============================================================================
 
 #SBATCH --job-name=ChasteTest
@@ -48,6 +51,9 @@ TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 # Path to the Apptainer/Singularity image file (in scratch space)
 SIF_IMAGE="/user/work/$(whoami)/containers/tissuemorphology.sif"
 
+# Source code directory - will be cloned/updated from GitHub
+SOURCE_DIR="/user/work/$(whoami)/TissueMorphology"
+
 # Output directory on the host (bind-mounted into the container)
 OUTPUT_DIR="/user/work/$(whoami)/chaste_output/${TEST_NAME}_${TIMESTAMP}_job${SLURM_JOB_ID}"
 mkdir -p "${OUTPUT_DIR}"
@@ -77,6 +83,7 @@ echo "  Account:       semt036404"
 echo "  Timestamp:     ${TIMESTAMP}"
 echo "  Start Time:    $(date)"
 echo "  SIF Image:     ${SIF_IMAGE}"
+echo "  Source Dir:    ${SOURCE_DIR}"
 echo "  Output Dir:    ${OUTPUT_DIR}"
 echo "  Log File:      ${LOG_FILE}"
 echo "============================================"
@@ -89,18 +96,37 @@ if [ ! -f "${SIF_IMAGE}" ]; then
     exit 1
 fi
 
-# ---------- Run the simulation ----------
+# ---------- Update source code from GitHub ----------
+echo ""
+echo "Updating TissueMorphology source from GitHub..."
+if [ -d "${SOURCE_DIR}/.git" ]; then
+    cd "${SOURCE_DIR}"
+    git fetch origin
+    git reset --hard origin/main
+    echo "  Updated to: $(git rev-parse --short HEAD)"
+else
+    echo "  Cloning repository..."
+    git clone https://github.com/lusCombeNCut/TissueMorphology.git "${SOURCE_DIR}"
+    cd "${SOURCE_DIR}"
+    echo "  Cloned at: $(git rev-parse --short HEAD)"
+fi
+echo ""
+
+# ---------- Build and run the simulation ----------
 # --bind: mount host directories into the container
+#   - Source directory to overlay the project in the container
 #   - Output directory for test results
 #   - Temp directory for CTest temporary files (writable)
 # --env: pass OpenMP thread count to match allocated CPUs
+echo "Building and running ${TEST_NAME}..."
 apptainer exec \
+    --bind "${SOURCE_DIR}:/home/chaste/src/projects/TissueMorphology" \
     --bind "${OUTPUT_DIR}:/home/chaste/output" \
     --bind "${TEMP_DIR}:/home/chaste/build/Testing/Temporary" \
     --env OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK} \
     --env CHASTE_TEST_OUTPUT=/home/chaste/output \
     "${SIF_IMAGE}" \
-    bash -c "cd /home/chaste/build && ctest -R ${TEST_NAME} -V --output-on-failure"
+    bash -c "cd /home/chaste/build && make -j${SLURM_CPUS_PER_TASK} ${TEST_NAME} && ctest -R ${TEST_NAME} -V --output-on-failure"
 
 EXIT_CODE=$?
 
