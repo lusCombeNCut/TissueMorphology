@@ -67,6 +67,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <vector>
 #include <algorithm>
 #include <numeric>
+#include <chrono>
 
 // Core Chaste
 #include "AbstractCellBasedTestSuite.hpp"
@@ -126,6 +127,7 @@ private:
     double mEndTime;
     unsigned mUpdateInterval;
     unsigned mLastUpdateStep;
+    std::chrono::steady_clock::time_point mStartWallTime;
     
 public:
     ProgressTrackingModifier(double endTime, unsigned updateInterval = 100)
@@ -147,6 +149,19 @@ public:
             double percentage = (current_time / mEndTime) * 100.0;
             unsigned num_cells = rCellPopulation.GetNumRealCells();
             
+            // Calculate real elapsed wall-clock time
+            auto now = std::chrono::steady_clock::now();
+            double elapsed_seconds = std::chrono::duration<double>(now - mStartWallTime).count();
+            int elapsed_min = static_cast<int>(elapsed_seconds) / 60;
+            int elapsed_sec = static_cast<int>(elapsed_seconds) % 60;
+            
+            // Estimate remaining time
+            double rate = current_time / elapsed_seconds;  // simulated hrs per real second
+            double remaining_sim_time = mEndTime - current_time;
+            double eta_seconds = (rate > 0) ? remaining_sim_time / rate : 0;
+            int eta_min = static_cast<int>(eta_seconds) / 60;
+            int eta_sec = static_cast<int>(eta_seconds) % 60;
+            
             // Create progress bar
             int bar_width = 40;
             int pos = static_cast<int>(bar_width * current_time / mEndTime);
@@ -159,8 +174,11 @@ public:
                 else std::cout << " ";
             }
             std::cout << "] " << std::fixed << std::setprecision(1) << percentage << "% "
-                      << "| Time: " << std::setprecision(2) << current_time << "/" << mEndTime << " hrs "
-                      << "| Cells: " << num_cells << std::flush;
+                      << "| Sim: " << std::setprecision(1) << current_time << "/" << mEndTime << " hrs "
+                      << "| Cells: " << num_cells
+                      << " | Elapsed: " << elapsed_min << "m" << std::setw(2) << std::setfill('0') << elapsed_sec << "s"
+                      << " ETA: " << eta_min << "m" << std::setw(2) << eta_sec << "s" << std::setfill(' ')
+                      << std::flush;
             
             mLastUpdateStep = current_step;
         }
@@ -168,16 +186,25 @@ public:
     
     virtual void SetupSolve(AbstractCellPopulation<DIM,DIM>& rCellPopulation, std::string outputDirectory)
     {
+        mStartWallTime = std::chrono::steady_clock::now();
         std::cout << "\nProgress:" << std::endl;
     }
     
     virtual void UpdateAtEndOfSolve(AbstractCellPopulation<DIM,DIM>& rCellPopulation)
     {
+        // Calculate total elapsed time
+        auto now = std::chrono::steady_clock::now();
+        double elapsed_seconds = std::chrono::duration<double>(now - mStartWallTime).count();
+        int elapsed_min = static_cast<int>(elapsed_seconds) / 60;
+        int elapsed_sec = static_cast<int>(elapsed_seconds) % 60;
+        
         // Print final completed progress bar
         std::cout << "\r[";
         for (int i = 0; i < 40; ++i) std::cout << "=";
-        std::cout << "] 100.0% | Time: " << mEndTime << "/" << mEndTime << " hrs "
-                  << "| Cells: " << rCellPopulation.GetNumRealCells() << std::endl;
+        std::cout << "] 100.0% | Sim: " << mEndTime << "/" << mEndTime << " hrs "
+                  << "| Cells: " << rCellPopulation.GetNumRealCells()
+                  << " | Total: " << elapsed_min << "m" << std::setw(2) << std::setfill('0') << elapsed_sec << "s"
+                  << std::setfill(' ') << std::endl;
     }
     
     virtual void OutputSimulationModifierParameters(out_stream& rParamsFile)
@@ -385,12 +412,7 @@ public:
         
         // Add output writers
         cell_population.AddCellWriter<CellIdWriter>();
-        celProgress tracking modifier - updates every 100 timesteps
-        boost::shared_ptr<ProgressTrackingModifier<3>> p_progress_modifier(
-            new ProgressTrackingModifier<3>(end_time, 100));
-        simulator.AddSimulationModifier(p_progress_modifier);
-        
-        // l_population.AddCellWriter<CellAgesWriter>();
+        cell_population.AddCellWriter<CellAgesWriter>();
         cell_population.AddCellPopulationCountWriter<CellProliferativeTypesCountWriter>();
         
         // ================================================================
@@ -462,6 +484,11 @@ public:
         // Volume tracking for contact inhibition cell cycle
         MAKE_PTR(VolumeTrackingModifier<3>, p_vol_modifier);
         simulator.AddSimulationModifier(p_vol_modifier);
+        
+        // Progress tracking modifier - updates every 100 timesteps
+        boost::shared_ptr<ProgressTrackingModifier<3>> p_progress_modifier(
+            new ProgressTrackingModifier<3>(end_time, 100));
+        simulator.AddSimulationModifier(p_progress_modifier);
         
         // ECM field writer: output every sampling_multiple timesteps
         // TEMPORARILY DISABLED FOR DEBUGGING
