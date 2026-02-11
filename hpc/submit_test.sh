@@ -40,6 +40,7 @@ TEST_NAME="$1"
 
 # ---------- Load modules ----------
 module load apptainer
+module load git
 
 # Set cache directory to scratch space
 export APPTAINER_CACHEDIR=/user/work/$(whoami)/.apptainer
@@ -53,6 +54,14 @@ SIF_IMAGE="/user/work/$(whoami)/containers/tissuemorphology.sif"
 
 # Source code directory - will be cloned/updated from GitHub
 SOURCE_DIR="/user/work/$(whoami)/TissueMorphology"
+
+# Persistent writable overlay for build artifacts (avoids tmpfs space limits)
+OVERLAY_IMG="/user/work/$(whoami)/containers/build_overlay.img"
+if [ ! -f "${OVERLAY_IMG}" ]; then
+    echo "Creating persistent build overlay (8 GB sparse file)..."
+    dd if=/dev/null of="${OVERLAY_IMG}" bs=1M seek=8192 2>/dev/null
+    mkfs.ext3 -q "${OVERLAY_IMG}"
+fi
 
 # Output directory on the host (bind-mounted into the container)
 OUTPUT_DIR="/user/work/$(whoami)/chaste_output/${TEST_NAME}_${TIMESTAMP}_job${SLURM_JOB_ID}"
@@ -84,6 +93,7 @@ echo "  Timestamp:     ${TIMESTAMP}"
 echo "  Start Time:    $(date)"
 echo "  SIF Image:     ${SIF_IMAGE}"
 echo "  Source Dir:    ${SOURCE_DIR}"
+echo "  Overlay:       ${OVERLAY_IMG}"
 echo "  Output Dir:    ${OUTPUT_DIR}"
 echo "  Log File:      ${LOG_FILE}"
 echo "============================================"
@@ -123,7 +133,7 @@ echo ""
 # This adds ~10-20 seconds but ensures new tests are discovered without rebuilding the image.
 echo "Configuring, building, and running ${TEST_NAME}..."
 apptainer exec \
-    --writable-tmpfs \
+    --overlay "${OVERLAY_IMG}" \
     --bind "${SOURCE_DIR}:/home/chaste/src/projects/TissueMorphology" \
     --bind "${OUTPUT_DIR}:/home/chaste/output" \
     --bind "${TEMP_DIR}:/home/chaste/build/Testing/Temporary" \
