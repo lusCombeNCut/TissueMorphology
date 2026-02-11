@@ -236,9 +236,9 @@ public:
         const double interaction_cutoff = 15.0;     // µm — cell-cell interaction range
         
         // Time
-        const double dt = 0.001;                    // hours (3.6 seconds)
+        const double dt = 0.01;                    // hours (3.6 seconds)
         const double end_time = 168.0;              // hours (7 days)
-        const unsigned sampling_multiple = 50;     // Output every dt*50 = 0.25 hour
+        const unsigned sampling_multiple = 20;     // Output every dt*50 = 0.25 hour
         
         // ECM
         const double ecm_domain_half = 80.0;        // µm — ECM domain: [-80, 80]^3
