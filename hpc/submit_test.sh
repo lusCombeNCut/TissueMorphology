@@ -55,21 +55,23 @@ SIF_IMAGE="/user/work/$(whoami)/containers/tissuemorphology.sif"
 # Source code directory - will be cloned/updated from GitHub
 SOURCE_DIR="/user/work/$(whoami)/TissueMorphology"
 
-# Persistent writable overlay for build artifacts (avoids tmpfs space limits)
-OVERLAY_IMG="/user/work/$(whoami)/containers/build_overlay.img"
-if [ ! -f "${OVERLAY_IMG}" ]; then
-    echo "Creating persistent build overlay (8 GB sparse file)..."
-    dd if=/dev/null of="${OVERLAY_IMG}" bs=1M seek=8192 2>/dev/null
-    mkfs.ext3 -q "${OVERLAY_IMG}"
+# Persistent build directory on the host (bind-mounted over /home/chaste/build)
+# This avoids writable-tmpfs running out of space and overlay permission issues.
+# On first run the build dir is seeded from the container image.
+BUILD_DIR="/user/work/$(whoami)/chaste_build"
+if [ ! -d "${BUILD_DIR}" ]; then
+    echo "Seeding persistent build directory from container image..."
+    mkdir -p "${BUILD_DIR}"
+    apptainer exec \
+        --bind "${BUILD_DIR}:/mnt" \
+        "${SIF_IMAGE}" \
+        bash -c "cp -a /home/chaste/build/. /mnt"
+    echo "  Done."
 fi
 
 # Output directory on the host (bind-mounted into the container)
 OUTPUT_DIR="/user/work/$(whoami)/chaste_output/${TEST_NAME}_${TIMESTAMP}_job${SLURM_JOB_ID}"
 mkdir -p "${OUTPUT_DIR}"
-
-# Create temporary directory for CTest
-TEMP_DIR="/user/work/$(whoami)/chaste_output/temp_${TIMESTAMP}_job${SLURM_JOB_ID}"
-mkdir -p "${TEMP_DIR}"
 
 # Log directory and files with timestamp
 LOG_DIR="/user/work/$(whoami)/logs"
@@ -93,7 +95,7 @@ echo "  Timestamp:     ${TIMESTAMP}"
 echo "  Start Time:    $(date)"
 echo "  SIF Image:     ${SIF_IMAGE}"
 echo "  Source Dir:    ${SOURCE_DIR}"
-echo "  Overlay:       ${OVERLAY_IMG}"
+echo "  Build Dir:     ${BUILD_DIR}"
 echo "  Output Dir:    ${OUTPUT_DIR}"
 echo "  Log File:      ${LOG_FILE}"
 echo "============================================"
@@ -133,10 +135,9 @@ echo ""
 # This adds ~10-20 seconds but ensures new tests are discovered without rebuilding the image.
 echo "Configuring, building, and running ${TEST_NAME}..."
 apptainer exec \
-    --overlay "${OVERLAY_IMG}" \
+    --bind "${BUILD_DIR}:/home/chaste/build" \
     --bind "${SOURCE_DIR}:/home/chaste/src/projects/TissueMorphology" \
     --bind "${OUTPUT_DIR}:/home/chaste/output" \
-    --bind "${TEMP_DIR}:/home/chaste/build/Testing/Temporary" \
     --env OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK} \
     --env CHASTE_TEST_OUTPUT=/home/chaste/output \
     "${SIF_IMAGE}" \
@@ -180,10 +181,5 @@ if [ -d "${OUTPUT_DIR}" ]; then
     echo "  To copy to local machine:"
     echo "    scp sv22482@bp1-login.acrc.bris.ac.uk:${ARCHIVE_PATH} ./"
 fi
-
-# Clean up temporary directory
-echo ""
-echo "Cleaning up temporary files..."
-rm -rf "${TEMP_DIR}"
 
 exit ${EXIT_CODE}
