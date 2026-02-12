@@ -55,19 +55,42 @@ def load_final_positions_from_vtu(vtu_path):
     """
     Parse cell positions from a Chaste VTU (VTK XML) file.
     Returns arrays of x, y coordinates.
+    Handles both ASCII inline and binary/appended VTU formats.
     """
+    # Try VTK Python library first (handles all formats)
+    try:
+        import vtk
+        reader = vtk.vtkXMLUnstructuredGridReader()
+        reader.SetFileName(vtu_path)
+        reader.Update()
+        output = reader.GetOutput()
+        points = output.GetPoints()
+        n_points = points.GetNumberOfPoints()
+        x = np.array([points.GetPoint(i)[0] for i in range(n_points)])
+        y = np.array([points.GetPoint(i)[1] for i in range(n_points)])
+        return x, y
+    except ImportError:
+        pass
+
+    # Fallback: parse ASCII inline VTU
     import xml.etree.ElementTree as ET
 
     tree = ET.parse(vtu_path)
     root = tree.getroot()
 
-    # Find Points/DataArray
     for piece in root.iter('Piece'):
         for points in piece.iter('Points'):
             for data_array in points.iter('DataArray'):
-                text = data_array.text.strip()
-                values = [float(v) for v in text.split()]
-                # VTU stores x,y,z triplets
+                fmt = data_array.get('format', 'ascii')
+                if fmt != 'ascii':
+                    raise ValueError(
+                        f"VTU uses '{fmt}' format — install the vtk Python "
+                        f"package (`pip install vtk`) to read binary VTU files, "
+                        f"or ensure results.viznodes is available.")
+                text = data_array.text
+                if text is None:
+                    continue
+                values = [float(v) for v in text.strip().split()]
                 n_points = len(values) // 3
                 x = np.array([values[3*i] for i in range(n_points)])
                 y = np.array([values[3*i+1] for i in range(n_points)])
@@ -76,37 +99,56 @@ def load_final_positions_from_vtu(vtu_path):
     raise ValueError(f"Could not parse positions from {vtu_path}")
 
 
-def load_final_positions_from_csv(csv_path):
+def load_positions_from_viznodes(viznodes_path):
     """
-    Load positions from crypt_summary.csv at the last timestep.
-    Falls back to reading individual node position files.
+    Load cell positions from a Chaste results.viznodes file.
+
+    Chaste viznodes format: each line is one timestep, starting with the
+    timestep index, followed by x y coordinate pairs for every cell:
+        0  x0 y0 x1 y1 x2 y2 ...
+        1  x0 y0 x1 y1 x2 y2 ...
+
+    We read the LAST line to get the final-time positions.
     """
-    # Look for results.viznodes files (Chaste format)
-    results_dir = os.path.dirname(csv_path)
-    viznode_files = sorted(glob.glob(os.path.join(results_dir, 'results_from_time_*', 'results.viznodes')))
+    last_line = None
+    with open(viznodes_path, 'r') as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped:
+                last_line = stripped
 
-    if viznode_files:
-        # Read last viznode file — contains "time x y" per line per cell
-        last_file = viznode_files[-1]
-        x_list, y_list = [], []
-        with open(last_file, 'r') as f:
-            for line in f:
-                parts = line.strip().split()
-                if len(parts) >= 3:
-                    try:
-                        x_list.append(float(parts[1]))
-                        y_list.append(float(parts[2]))
-                    except ValueError:
-                        continue
-        if x_list:
-            return np.array(x_list), np.array(y_list)
+    if last_line is None:
+        raise ValueError(f"Empty viznodes file: {viznodes_path}")
 
-    # Fallback: try any VTU file
-    vtu_files = sorted(glob.glob(os.path.join(results_dir, 'results_*.vtu')))
+    parts = last_line.split()
+    # First element is the timestep index; remaining are x,y pairs
+    coords = [float(v) for v in parts[1:]]
+    if len(coords) < 2 or len(coords) % 2 != 0:
+        raise ValueError(f"Unexpected coordinate count in {viznodes_path}")
+
+    x = np.array(coords[0::2])
+    y = np.array(coords[1::2])
+    return x, y
+
+
+def load_final_positions(data_dir):
+    """
+    Load final cell positions from a Chaste output directory.
+    Tries, in order:
+      1. results.viznodes  (fast, always ASCII)
+      2. Last VTU file     (may need vtk library for binary format)
+    """
+    # 1. Try viznodes (most reliable — always ASCII in Chaste)
+    viznodes = os.path.join(data_dir, 'results.viznodes')
+    if os.path.exists(viznodes):
+        return load_positions_from_viznodes(viznodes)
+
+    # 2. Fallback: try VTU files
+    vtu_files = sorted(glob.glob(os.path.join(data_dir, 'results_*.vtu')))
     if vtu_files:
         return load_final_positions_from_vtu(vtu_files[-1])
 
-    raise FileNotFoundError(f"No position data found near {csv_path}")
+    raise FileNotFoundError(f"No position data found in {data_dir}")
 
 
 def count_crypts_from_positions(x, y, min_depth=0.5, min_distance_frac=0.1):
@@ -249,18 +291,24 @@ def analyse_sweep_directory(data_dir, model_label=""):
             run_label = os.path.basename(r_dir)
 
             try:
-                # Try to load final positions
-                csv_path = os.path.join(r_dir, 'crypt_summary.csv')
-                if os.path.exists(csv_path):
-                    x, y = load_final_positions_from_csv(csv_path)
-                else:
-                    # Try VTU directly
-                    vtu_files = sorted(glob.glob(os.path.join(r_dir, 'results_*.vtu')))
-                    if vtu_files:
-                        x, y = load_final_positions_from_vtu(vtu_files[-1])
-                    else:
-                        print(f"  SKIP {dirname}/{run_label}: no output data")
+                # Chaste may place output directly in run_* or inside
+                # a results_from_time_* subdirectory.  Check both.
+                search_dirs = [r_dir]
+                for sub in sorted(glob.glob(os.path.join(r_dir, 'results_from_time_*'))):
+                    if os.path.isdir(sub):
+                        search_dirs.append(sub)
+
+                x, y = None, None
+                for search_dir in search_dirs:
+                    try:
+                        x, y = load_final_positions(search_dir)
+                        break
+                    except (FileNotFoundError, ValueError):
                         continue
+
+                if x is None:
+                    print(f"  SKIP {dirname}/{run_label}: no output data")
+                    continue
 
                 n_crypts, positions, _ = count_crypts_from_positions(x, y)
                 results[stiffness].append(n_crypts)

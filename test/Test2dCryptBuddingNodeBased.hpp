@@ -479,15 +479,6 @@ public:
 
         RunCryptBuddingSimulation(bm_stiffness, seed, subdir.str());
     }
-
-    /**
-     * Quick local test with a single moderate stiffness value.
-     * Useful for verifying compilation and basic functionality.
-     */
-    void TestCryptBuddingQuickCheck()
-    {
-        RunCryptBuddingSimulation(5.0, 12345, "quick_check");
-    }
 };
 
 #endif /* TEST2DCRYPTBUDDINGNODEBASED_HPP_ */

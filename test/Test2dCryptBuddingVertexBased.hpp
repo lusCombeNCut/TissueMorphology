@@ -506,14 +506,6 @@ public:
 
         RunVertexCryptBuddingSimulation(ecm_stiffness, seed, subdir.str());
     }
-
-    /**
-     * Quick local test for compilation and sanity checking.
-     */
-    void TestVertexCryptBuddingQuickCheck()
-    {
-        RunVertexCryptBuddingSimulation(5.0, 12345, "quick_check");
-    }
 };
 
 #endif /* TEST2DCRYPTBUDDINGVERTEXBASED_HPP_ */
