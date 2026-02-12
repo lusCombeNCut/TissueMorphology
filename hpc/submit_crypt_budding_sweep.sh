@@ -25,18 +25,23 @@
 
 #SBATCH --job-name=CryptBud
 #SBATCH --account=semt036404
+#SBATCH --partition=compute
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
+#SBATCH --mem-per-cpu=4G
 #SBATCH --time=12:00:00
-#SBATCH --array=0-69
+#SBATCH --array=0-69%20
+#SBATCH --output=/user/work/%u/logs/crypt_budding/slurm-%A_%a.out
+#SBATCH --error=/user/work/%u/logs/crypt_budding/slurm-%A_%a.err
 
 # ---------- Parse arguments ----------
 MODEL_TYPE="${1:-node}"
 
 if [ "$MODEL_TYPE" = "both" ]; then
     echo "Submitting both node-based and vertex-based sweeps..."
+    # Ensure log directory exists before sbatch (Slurm needs it for --output/--error)
+    mkdir -p "/user/work/$(whoami)/logs/crypt_budding"
     sbatch --export=ALL "$0" node
     sbatch --export=ALL "$0" vertex
     exit 0
@@ -59,6 +64,9 @@ module load apptainer
 module load git
 
 export APPTAINER_CACHEDIR=/user/work/$(whoami)/.apptainer
+
+# OpenMP thread count — must match cpus-per-task (see HPC docs)
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 
 # ---------- Stiffness levels ----------
 # 7 stiffness levels, 10 replicates each = 70 array tasks (0-69)
@@ -142,9 +150,44 @@ else
     echo "  Cloned at: $(git rev-parse --short HEAD)"
 fi
 
-# ---------- Build and run ----------
+# ---------- Build (serialised across array tasks) ----------
+# Multiple array tasks share the same build directory. Use flock to ensure
+# only one task runs cmake/make at a time — prevents build corruption.
+BUILD_LOCK="${BUILD_DIR}/.build.lock"
+touch "${BUILD_LOCK}"
+
 echo ""
-echo "Building and running ${TEST_NAME} (stiffness=${ECM_STIFFNESS}, run=${RUN_NUMBER})..."
+echo "Acquiring build lock (may wait for other tasks)..."
+(
+    flock -x 200   # exclusive lock on fd 200
+
+    echo "  Lock acquired by task ${SLURM_ARRAY_TASK_ID} at $(date)"
+
+    # Clean stale FetchContent state that breaks cmake reconfigure
+    # (cellml_repo-subbuild references paths from the original container build)
+    rm -rf "${BUILD_DIR}/_deps/cellml_repo-subbuild"
+
+    apptainer exec \
+        --bind "${BUILD_DIR}:/home/chaste/build" \
+        --bind "${SOURCE_DIR}:/home/chaste/src/projects/TissueMorphology" \
+        --env OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK} \
+        "${SIF_IMAGE}" \
+        bash -c "cd /home/chaste/build && \
+                 cmake /home/chaste/src -DChaste_ERROR_ON_WARNING=OFF && \
+                 make -j${SLURM_CPUS_PER_TASK} ${TEST_NAME}"
+
+    echo "  Build completed by task ${SLURM_ARRAY_TASK_ID} at $(date)"
+) 200>"${BUILD_LOCK}"
+
+BUILD_EXIT=$?
+if [ ${BUILD_EXIT} -ne 0 ]; then
+    echo "ERROR: Build failed with exit code ${BUILD_EXIT}"
+    exit ${BUILD_EXIT}
+fi
+
+# ---------- Run simulation ----------
+echo ""
+echo "Running ${TEST_NAME} (stiffness=${ECM_STIFFNESS}, run=${RUN_NUMBER})..."
 
 apptainer exec \
     --bind "${BUILD_DIR}:/home/chaste/build" \
@@ -156,11 +199,16 @@ apptainer exec \
     --env RUN_NUMBER=${RUN_NUMBER} \
     "${SIF_IMAGE}" \
     bash -c "cd /home/chaste/build && \
-             cmake /home/chaste/src -DChaste_ERROR_ON_WARNING=OFF 2>&1 | tail -3 && \
-             make -j${SLURM_CPUS_PER_TASK} ${TEST_NAME} && \
              ctest -R ${TEST_NAME} -V --output-on-failure"
 
 EXIT_CODE=$?
+
+# ---------- Cancel all sibling jobs on failure ----------
+if [ $EXIT_CODE -ne 0 ]; then
+    echo ""
+    echo "*** JOB FAILED (exit code: ${EXIT_CODE}) — cancelling all remaining array tasks ***"
+    scancel ${SLURM_ARRAY_JOB_ID}
+fi
 
 # ---------- Archive output ----------
 ARCHIVE_DIR="/user/work/$(whoami)/chaste_output/CryptBudding_${MODEL_TYPE}_results"

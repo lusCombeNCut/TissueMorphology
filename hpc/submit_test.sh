@@ -133,6 +133,9 @@ echo ""
 #
 # The cmake step is needed to pick up new test files added to ContinuousTestPack.txt
 # This adds ~10-20 seconds but ensures new tests are discovered without rebuilding the image.
+# Clean stale FetchContent state (cellml_repo-subbuild) to prevent cmake reconfigure errors.
+rm -rf "${BUILD_DIR}/_deps/cellml_repo-subbuild"
+
 echo "Configuring, building, and running ${TEST_NAME}..."
 apptainer exec \
     --bind "${BUILD_DIR}:/home/chaste/build" \
