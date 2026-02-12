@@ -210,16 +210,41 @@ if [ $EXIT_CODE -ne 0 ]; then
     scancel ${SLURM_ARRAY_JOB_ID}
 fi
 
-# ---------- Archive output ----------
-ARCHIVE_DIR="/user/work/$(whoami)/chaste_output/CryptBudding_${MODEL_TYPE}_results"
-mkdir -p "${ARCHIVE_DIR}"
-ARCHIVE_NAME="s${ECM_STIFFNESS}_r${RUN_NUMBER}.zip"
-ARCHIVE_PATH="${ARCHIVE_DIR}/${ARCHIVE_NAME}"
+# ---------- Copy output to shared results directory ----------
+# All array tasks write into one shared results tree, structured as:
+#   CryptBudding_<model>_results/stiffness_<s>/run_<r>/
+# A single zip archive is created by the LAST finishing task.
+RESULTS_DIR="/user/work/$(whoami)/chaste_output/CryptBudding_${MODEL_TYPE}_results"
+TASK_RESULTS="${RESULTS_DIR}/stiffness_${ECM_STIFFNESS}/run_${RUN_NUMBER}"
+mkdir -p "${TASK_RESULTS}"
 
 if [ -d "${OUTPUT_DIR}" ]; then
-    cd "$(dirname ${OUTPUT_DIR})"
-    zip -rq "${ARCHIVE_PATH}" "$(basename ${OUTPUT_DIR})"
-    echo "Archive: ${ARCHIVE_PATH}"
+    cp -a "${OUTPUT_DIR}/." "${TASK_RESULTS}/"
+    echo "Results copied to: ${TASK_RESULTS}"
+fi
+
+# Mark this task as done
+DONE_DIR="${RESULTS_DIR}/.done"
+mkdir -p "${DONE_DIR}"
+touch "${DONE_DIR}/task_${SLURM_ARRAY_TASK_ID}"
+
+# Count completed tasks — if all 70 are done, create the final archive
+NUM_DONE=$(ls "${DONE_DIR}/" 2>/dev/null | wc -l)
+TOTAL_TASKS=70
+echo "Completed tasks: ${NUM_DONE}/${TOTAL_TASKS}"
+
+if [ "${NUM_DONE}" -ge "${TOTAL_TASKS}" ]; then
+    echo ""
+    echo "All tasks complete — creating final archive..."
+    ARCHIVE_PATH="/user/work/$(whoami)/chaste_output/CryptBudding_${MODEL_TYPE}_$(date +%Y%m%d_%H%M%S).zip"
+    cd "$(dirname ${RESULTS_DIR})"
+    zip -rq "${ARCHIVE_PATH}" "$(basename ${RESULTS_DIR})" \
+        -x "$(basename ${RESULTS_DIR})/.done/*"
+    echo "Final archive: ${ARCHIVE_PATH}"
+    echo "Size: $(du -h "${ARCHIVE_PATH}" | cut -f1)"
+    echo ""
+    echo "To download:"
+    echo "  scp sv22482@bp1-login.acrc.bris.ac.uk:${ARCHIVE_PATH} ./"
 fi
 
 # ---------- Summary ----------
@@ -230,8 +255,7 @@ echo "  Exit Code:       ${EXIT_CODE}"
 echo "  End Time:        $(date)"
 echo "  ECM Stiffness:   ${ECM_STIFFNESS}"
 echo "  Replicate:       ${RUN_NUMBER}"
-echo "  Output:          ${OUTPUT_DIR}"
-echo "  Archive:         ${ARCHIVE_PATH}"
+echo "  Output:          ${TASK_RESULTS}"
 echo "  Log:             ${LOG_FILE}"
 echo "============================================"
 
