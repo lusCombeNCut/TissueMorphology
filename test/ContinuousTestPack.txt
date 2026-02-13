@@ -9,5 +9,5 @@ Test2dDynamicECMInvasion.hpp
 Test2dPainterReplication.hpp
 Test3dCryptOrganoid.hpp
 Test3dVertexCryptOrganoid.hpp
-Test2dCryptBuddingNodeBased.hpp
-Test2dCryptBuddingVertexBased.hpp
+CryptBudding2d/Test2dCryptBuddingNodeBased.hpp
+CryptBudding2d/Test2dCryptBuddingVertexBased.hpp

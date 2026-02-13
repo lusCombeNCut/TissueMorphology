@@ -226,8 +226,8 @@ private:
         // ================================================================
 
         // Mesh geometry — flat honeycomb monolayer
-        const unsigned cells_across = 14;   // width
-        const unsigned cells_up = 8;        // height
+        const unsigned cells_across = 28;   // width (doubled)
+        const unsigned cells_up = 16;       // height (doubled)
         const bool flat_bottom = true;
 
         // Time (hours)
@@ -245,13 +245,17 @@ private:
 
         // Basement membrane
         const double bm_stiffness = ecmStiffness * 0.5;  // scales with ECM
-        const double bm_radius = 12.0;
+        const double bm_radius = 24.0;
+
+        // ECM degradation — allows organoid to grow beyond initial BM radius
+        const double ecm_degradation_rate = 0.05;  // radius units per hour
+        const double ecm_max_radius = 50.0;         // biological ceiling
 
         // Target area
         const double target_area = 1.0;
 
         // Sloughing
-        const double slough_height = 14.0;
+        const double slough_height = 28.0;
 
         // ================================================================
         // SETUP
@@ -294,7 +298,7 @@ private:
             // Contact inhibition cell cycle
             ContactInhibitionCellCycleModel* p_cycle = new ContactInhibitionCellCycleModel();
             p_cycle->SetDimension(2);
-            p_cycle->SetQuiescentVolumeFraction(0.75);
+            p_cycle->SetQuiescentVolumeFraction(0.6);
             p_cycle->SetEquilibriumVolume(target_area);
 
             CellPtr p_cell(new Cell(p_state, p_cycle));
@@ -375,7 +379,8 @@ private:
         MAKE_PTR(BasementMembraneForce<2>, p_bm_force);
         p_bm_force->SetBasementMembraneParameter(bm_stiffness);
         p_bm_force->SetBasementMembraneRadius(bm_radius);
-        p_bm_force->DisableEcmDegradation();
+        // Enable ECM degradation so the organoid can keep growing
+        p_bm_force->EnableEcmDegradation(ecm_degradation_rate, ecm_max_radius);
         simulator.AddForce(p_bm_force);
 
         // ================================================================

@@ -206,8 +206,8 @@ private:
         // ================================================================
 
         // Domain geometry — flat monolayer that can buckle downward
-        const unsigned cells_across = 20;   // width of initial monolayer
-        const unsigned cells_up = 6;        // initial height (rows)
+        const unsigned cells_across = 40;   // width of initial monolayer
+        const unsigned cells_up = 12;       // initial height (rows)
         const double interaction_cutoff = 3.0;  // cell interaction radius
 
         // Time parameters (hours)
@@ -216,8 +216,12 @@ private:
         const unsigned sampling_multiple = 200; // output every dt*200 = 1 hour
 
         // Basement membrane / substrate
-        const double bm_radius = 15.0;      // radius of confinement region
+        const double bm_radius = 30.0;      // radius of confinement region
         // bmStiffness passed as argument — the key independent variable
+
+        // ECM degradation — allows organoid to grow beyond initial BM radius
+        const double ecm_degradation_rate = 0.05;  // radius units per hour
+        const double ecm_max_radius = 60.0;         // biological ceiling
 
         // Spring force
         const double spring_stiffness = 30.0;
@@ -228,10 +232,10 @@ private:
         const double stem_g1_max = 14.0;
         const double ta_g1_min = 4.0;
         const double ta_g1_max = 6.0;
-        const double quiescent_fraction = 0.8;  // contact inhibition threshold
+        const double quiescent_fraction = 0.6;  // contact inhibition threshold (lowered to sustain growth)
 
         // Sloughing
-        const double slough_height = 20.0;  // cells above this y are killed
+        const double slough_height = 40.0;  // cells above this y are killed
 
         // ================================================================
         // SETUP
@@ -350,8 +354,8 @@ private:
         MAKE_PTR(BasementMembraneForce<2>, p_bm_force);
         p_bm_force->SetBasementMembraneParameter(bmStiffness);
         p_bm_force->SetBasementMembraneRadius(bm_radius);
-        // No degradation in this baseline experiment
-        p_bm_force->DisableEcmDegradation();
+        // Enable ECM degradation so the organoid can keep growing
+        p_bm_force->EnableEcmDegradation(ecm_degradation_rate, ecm_max_radius);
         simulator.AddForce(p_bm_force);
 
         // ================================================================
