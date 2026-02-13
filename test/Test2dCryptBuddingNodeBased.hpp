@@ -100,18 +100,26 @@ class CryptBuddingSummaryModifier : public AbstractCellBasedSimulationModifier<D
 private:
     std::string mOutputDir;
     double mStiffness;
+    double mEndTime;
     bool mHeaderWritten;
     unsigned mSamplingMultiple;
+    unsigned mLogInterval;       // progress log every ~10 min
     unsigned mLastOutputStep;
+    unsigned mLastLogStep;
 
 public:
-    CryptBuddingSummaryModifier(double stiffness, unsigned samplingMultiple)
+    CryptBuddingSummaryModifier(double stiffness, unsigned samplingMultiple,
+                                double endTime = 168.0)
         : AbstractCellBasedSimulationModifier<DIM>(),
           mStiffness(stiffness),
+          mEndTime(endTime),
           mHeaderWritten(false),
           mSamplingMultiple(samplingMultiple),
-          mLastOutputStep(0)
+          mLogInterval(samplingMultiple / 6),  // ~10 min (sampling ≈ 1 hour)
+          mLastOutputStep(0),
+          mLastLogStep(0)
     {
+        if (mLogInterval == 0) mLogInterval = 1;
     }
 
     void SetupSolve(AbstractCellPopulation<DIM,DIM>& rCellPopulation,
@@ -123,14 +131,26 @@ public:
     void UpdateAtEndOfTimeStep(AbstractCellPopulation<DIM,DIM>& rCellPopulation)
     {
         unsigned current_step = SimulationTime::Instance()->GetTimeStepsElapsed();
+        double current_time = SimulationTime::Instance()->GetTime();
+        unsigned num_cells = rCellPopulation.GetNumRealCells();
+
+        // Progress log every ~10 minutes of sim time
+        if (current_step == 0 || current_step - mLastLogStep >= mLogInterval)
+        {
+            mLastLogStep = current_step;
+            double pct = (mEndTime > 0.0) ? (current_time / mEndTime) * 100.0 : 0.0;
+            std::cout << "[Progress] t=" << std::fixed << std::setprecision(1)
+                      << current_time << "h / " << mEndTime << "h  ("
+                      << std::setprecision(1) << pct << "%)  cells="
+                      << num_cells << std::endl;
+        }
+
+        // CSV output at the normal sampling interval (~1 hour)
         if (current_step - mLastOutputStep < mSamplingMultiple && current_step > 0)
         {
             return;
         }
         mLastOutputStep = current_step;
-
-        double current_time = SimulationTime::Instance()->GetTime();
-        unsigned num_cells = rCellPopulation.GetNumRealCells();
 
         // Compute y-statistics for crypt depth analysis
         double sum_y = 0.0;
@@ -393,7 +413,7 @@ private:
 
         // Custom summary writer
         boost::shared_ptr<CryptBuddingSummaryModifier<2>> p_summary(
-            new CryptBuddingSummaryModifier<2>(bmStiffness, sampling_multiple));
+            new CryptBuddingSummaryModifier<2>(bmStiffness, sampling_multiple, end_time));
         simulator.AddSimulationModifier(p_summary);
 
         // ================================================================

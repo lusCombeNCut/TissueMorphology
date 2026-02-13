@@ -106,18 +106,26 @@ class VertexCryptSummaryModifier : public AbstractCellBasedSimulationModifier<DI
 private:
     std::string mOutputDir;
     double mStiffness;
+    double mEndTime;
     bool mHeaderWritten;
     unsigned mSamplingMultiple;
+    unsigned mLogInterval;       // progress log every ~10 min
     unsigned mLastOutputStep;
+    unsigned mLastLogStep;
 
 public:
-    VertexCryptSummaryModifier(double stiffness, unsigned samplingMultiple)
+    VertexCryptSummaryModifier(double stiffness, unsigned samplingMultiple,
+                               double endTime = 168.0)
         : AbstractCellBasedSimulationModifier<DIM>(),
           mStiffness(stiffness),
+          mEndTime(endTime),
           mHeaderWritten(false),
           mSamplingMultiple(samplingMultiple),
-          mLastOutputStep(0)
+          mLogInterval(samplingMultiple / 6),  // ~10 min (sampling ≈ 1 hour)
+          mLastOutputStep(0),
+          mLastLogStep(0)
     {
+        if (mLogInterval == 0) mLogInterval = 1;
     }
 
     void SetupSolve(AbstractCellPopulation<DIM,DIM>& rCellPopulation,
@@ -129,14 +137,26 @@ public:
     void UpdateAtEndOfTimeStep(AbstractCellPopulation<DIM,DIM>& rCellPopulation)
     {
         unsigned current_step = SimulationTime::Instance()->GetTimeStepsElapsed();
+        double current_time = SimulationTime::Instance()->GetTime();
+        unsigned num_cells = rCellPopulation.GetNumRealCells();
+
+        // Progress log every ~10 minutes of sim time
+        if (current_step == 0 || current_step - mLastLogStep >= mLogInterval)
+        {
+            mLastLogStep = current_step;
+            double pct = (mEndTime > 0.0) ? (current_time / mEndTime) * 100.0 : 0.0;
+            std::cout << "[Progress] t=" << std::fixed << std::setprecision(1)
+                      << current_time << "h / " << mEndTime << "h  ("
+                      << std::setprecision(1) << pct << "%)  cells="
+                      << num_cells << std::endl;
+        }
+
+        // CSV output at the normal sampling interval (~1 hour)
         if (current_step - mLastOutputStep < mSamplingMultiple && current_step > 0)
         {
             return;
         }
         mLastOutputStep = current_step;
-
-        double current_time = SimulationTime::Instance()->GetTime();
-        unsigned num_cells = rCellPopulation.GetNumRealCells();
 
         // Compute centroid y-statistics
         double sum_y = 0.0, sum_y2 = 0.0;
@@ -231,9 +251,13 @@ private:
         const bool flat_bottom = true;
 
         // Time (hours)
-        const double dt = 0.002;
-        const double end_time = 168.0;      // 7 days
-        const unsigned sampling_multiple = 500; // output every dt*500 = 1 hour
+        // Adaptive dt: low stiffness → more deformation → smaller step needed
+        // to prevent boundary nodes intersecting non-boundary edges (concave elements)
+        const double dt = (ecmStiffness < 1.0) ? 0.0005
+                        : (ecmStiffness < 2.0) ? 0.001
+                        :                        0.002;
+        const double end_time = 200.0;      // ~8 days
+        const unsigned sampling_multiple = static_cast<unsigned>(1.0 / dt); // output every ~1 hour
 
         // Nagai-Honda force parameters
         // Area elasticity scales with ECM stiffness — stiffer substrate
@@ -268,10 +292,14 @@ private:
                                                 flat_bottom);
         boost::shared_ptr<MutableVertexMesh<2,2> > p_mesh = generator.GetMesh();
 
-        // Set T1 and T2 thresholds
-        p_mesh->SetCellRearrangementThreshold(0.1);
+        // Set T1 and T2 thresholds — more aggressive rearrangement for
+        // low stiffness to prevent concave elements
+        double t1_threshold = (ecmStiffness < 2.0) ? 0.15 : 0.1;
+        p_mesh->SetCellRearrangementThreshold(t1_threshold);
         p_mesh->SetT2Threshold(0.01);
         p_mesh->SetCellRearrangementRatio(1.5);
+        p_mesh->SetProtorosetteFormationProbability(0.0);
+        p_mesh->SetProtorosetteResolutionProbabilityPerTimestep(1.0);
 
         // ================================================================
         // CREATE CELLS
@@ -424,7 +452,7 @@ private:
 
         // Custom summary writer
         boost::shared_ptr<VertexCryptSummaryModifier<2>> p_summary(
-            new VertexCryptSummaryModifier<2>(ecmStiffness, sampling_multiple));
+            new VertexCryptSummaryModifier<2>(ecmStiffness, sampling_multiple, end_time));
         simulator.AddSimulationModifier(p_summary);
 
         // ================================================================
@@ -438,6 +466,8 @@ private:
         std::cout << "    → BM stiffness:   " << bm_stiffness << std::endl;
         std::cout << "  Random Seed:     " << randomSeed << std::endl;
         std::cout << "  Mesh:            " << cells_across << " x " << cells_up << std::endl;
+        std::cout << "  dt:              " << dt << std::endl;
+        std::cout << "  T1 threshold:    " << t1_threshold << std::endl;
         std::cout << "  End Time:        " << end_time << " hours" << std::endl;
         std::cout << "  Output:          testoutput/" << output_dir << std::endl;
         std::cout << "============================================" << std::endl;
