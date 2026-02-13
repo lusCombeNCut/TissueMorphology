@@ -114,7 +114,7 @@ if [ ! -d "${BUILD_DIR}" ]; then
 fi
 
 # Output directory
-OUTPUT_DIR="/user/work/$(whoami)/chaste_output/CryptBudding_${MODEL_TYPE}_s${ECM_STIFFNESS}_r${RUN_NUMBER}_job${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
+OUTPUT_DIR="/user/work/$(whoami)/sim_output/CryptBudding_${MODEL_TYPE}_s${ECM_STIFFNESS}_r${RUN_NUMBER}_job${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 mkdir -p "${OUTPUT_DIR}"
 
 # Logging
@@ -214,7 +214,7 @@ apptainer exec \
 EXIT_CODE=$?
 
 # ---------- Archive output ----------
-ARCHIVE_DIR="/user/work/$(whoami)/chaste_output/CryptBudding_${MODEL_TYPE}_results"
+ARCHIVE_DIR="/user/work/$(whoami)/sim_output/CryptBudding_${MODEL_TYPE}_results"
 mkdir -p "${ARCHIVE_DIR}"
 ARCHIVE_NAME="s${ECM_STIFFNESS}_r${RUN_NUMBER}.zip"
 ARCHIVE_PATH="${ARCHIVE_DIR}/${ARCHIVE_NAME}"
