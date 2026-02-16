@@ -41,6 +41,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "AbstractForce.hpp"
 #include "AbstractCellPopulation.hpp"
+#include "VertexBasedCellPopulation.hpp"
 #include "SimulationTime.hpp"
 
 /**
@@ -140,16 +141,18 @@ public:
         // Update basement membrane radius due to ECM degradation
         UpdateBasementMembraneRadius();
 
+        // Detect vertex-based population (for force distribution)
+        VertexBasedCellPopulation<DIM>* p_vertex_pop =
+            dynamic_cast<VertexBasedCellPopulation<DIM>*>(&rCellPopulation);
+
         // Apply basement membrane forces to cells outside the radius
         for (typename AbstractCellPopulation<DIM>::Iterator cell_iter = rCellPopulation.Begin();
              cell_iter != rCellPopulation.End();
              ++cell_iter)
         {
-            unsigned node_index = rCellPopulation.GetLocationIndexUsingCell(*cell_iter);
-            Node<DIM>* p_node = rCellPopulation.GetNode(node_index);
-
-            c_vector<double, DIM> node_location = p_node->rGetLocation();
-            c_vector<double, DIM> displacement = node_location - mOrganoidCenter;
+            // Use cell centre (works for both node-based and vertex-based)
+            c_vector<double, DIM> cell_location = rCellPopulation.GetLocationOfCellCentre(*cell_iter);
+            c_vector<double, DIM> displacement = cell_location - mOrganoidCenter;
             double distance_from_center = norm_2(displacement);
 
             // Apply force if cell is beyond basement membrane radius
@@ -171,7 +174,22 @@ public:
                 c_vector<double, DIM> unit_displacement = displacement / distance_from_center;
                 c_vector<double, DIM> force = -stiffness * excess_distance * unit_displacement;
 
-                p_node->AddAppliedForceContribution(force);
+                // Apply force: distribute across element vertices for vertex pops
+                unsigned loc_index = rCellPopulation.GetLocationIndexUsingCell(*cell_iter);
+                if (p_vertex_pop)
+                {
+                    VertexElement<DIM, DIM>* p_element = p_vertex_pop->rGetMesh().GetElement(loc_index);
+                    unsigned n_nodes = p_element->GetNumNodes();
+                    c_vector<double, DIM> force_per_node = force / static_cast<double>(n_nodes);
+                    for (unsigned i = 0; i < n_nodes; i++)
+                    {
+                        p_element->GetNode(i)->AddAppliedForceContribution(force_per_node);
+                    }
+                }
+                else
+                {
+                    rCellPopulation.GetNode(loc_index)->AddAppliedForceContribution(force);
+                }
             }
         }
     }
@@ -190,10 +208,7 @@ public:
              cell_iter != rCellPopulation.End();
              ++cell_iter)
         {
-            unsigned node_index = rCellPopulation.GetLocationIndexUsingCell(*cell_iter);
-            Node<DIM>* p_node = rCellPopulation.GetNode(node_index);
-
-            center += p_node->rGetLocation();
+            center += rCellPopulation.GetLocationOfCellCentre(*cell_iter);
             num_cells++;
         }
 

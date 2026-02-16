@@ -41,6 +41,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "AbstractForce.hpp"
 #include "AbstractCellPopulation.hpp"
+#include "VertexBasedCellPopulation.hpp"
 
 /**
  * A force class to model apical constriction in epithelial tissues.
@@ -120,6 +121,10 @@ public:
         // Calculate population centroid for radial direction
         c_vector<double, DIM> centroid = rCellPopulation.GetCentroidOfCellPopulation();
 
+        // Detect vertex-based population (for force distribution)
+        VertexBasedCellPopulation<DIM>* p_vertex_pop =
+            dynamic_cast<VertexBasedCellPopulation<DIM>*>(&rCellPopulation);
+
         // Apply constriction force to apical cells
         for (typename AbstractCellPopulation<DIM>::Iterator cell_iter = rCellPopulation.Begin();
              cell_iter != rCellPopulation.End();
@@ -143,14 +148,13 @@ public:
                 continue;
             }
 
-            unsigned node_index = rCellPopulation.GetLocationIndexUsingCell(*cell_iter);
-            Node<DIM>* p_node = rCellPopulation.GetNode(node_index);
+            unsigned loc_index = rCellPopulation.GetLocationIndexUsingCell(*cell_iter);
 
             // Get cell's current area (approximation based on local density)
-            double current_area = EstimateCellArea(rCellPopulation, node_index);
+            double current_area = EstimateCellArea(rCellPopulation, loc_index);
             
             // Get reference area
-            double reference_area = mReferenceAreas[node_index];
+            double reference_area = mReferenceAreas[loc_index];
             
             // Calculate target area
             double target_area = reference_area * (1.0 - mTargetReduction);
@@ -161,7 +165,7 @@ public:
             if (area_difference > 0.0)  // Only apply if cell needs to constrict
             {
                 // Direction: toward centroid (apical constriction)
-                c_vector<double, DIM> cell_location = p_node->rGetLocation();
+                c_vector<double, DIM> cell_location = rCellPopulation.GetLocationOfCellCentre(*cell_iter);
                 c_vector<double, DIM> displacement = cell_location - centroid;
                 double distance = norm_2(displacement);
                 
@@ -171,8 +175,22 @@ public:
                     
                     // Force: inward (negative radial), proportional to excess area
                     c_vector<double, DIM> force = -mConstrictionStrength * area_difference * unit_radial;
-                    
-                    p_node->AddAppliedForceContribution(force);
+
+                    // Apply force: distribute across element vertices for vertex pops
+                    if (p_vertex_pop)
+                    {
+                        VertexElement<DIM, DIM>* p_element = p_vertex_pop->rGetMesh().GetElement(loc_index);
+                        unsigned n_nodes = p_element->GetNumNodes();
+                        c_vector<double, DIM> force_per_node = force / static_cast<double>(n_nodes);
+                        for (unsigned i = 0; i < n_nodes; i++)
+                        {
+                            p_element->GetNode(i)->AddAppliedForceContribution(force_per_node);
+                        }
+                    }
+                    else
+                    {
+                        rCellPopulation.GetNode(loc_index)->AddAppliedForceContribution(force);
+                    }
                 }
             }
         }
@@ -206,16 +224,22 @@ public:
      * @param nodeIndex index of the cell/node
      * @return estimated area
      */
-    double EstimateCellArea(AbstractCellPopulation<DIM>& rCellPopulation, unsigned nodeIndex)
+    double EstimateCellArea(AbstractCellPopulation<DIM>& rCellPopulation, unsigned locIndex)
     {
-        // Simple approximation: area ~ π * r_neighbor^2
-        // where r_neighbor is average distance to neighbors
-        
-        Node<DIM>* p_node = rCellPopulation.GetNode(nodeIndex);
+        // For vertex-based: use actual element area
+        VertexBasedCellPopulation<DIM>* p_vertex_pop =
+            dynamic_cast<VertexBasedCellPopulation<DIM>*>(&rCellPopulation);
+        if (p_vertex_pop)
+        {
+            return p_vertex_pop->rGetMesh().GetVolumeOfElement(locIndex);
+        }
+
+        // For node-based: area ~ π * r_neighbor^2
+        Node<DIM>* p_node = rCellPopulation.GetNode(locIndex);
         c_vector<double, DIM> node_location = p_node->rGetLocation();
         
         // Find neighboring nodes
-        std::set<unsigned> neighbor_indices = rCellPopulation.GetNeighbouringNodeIndices(nodeIndex);
+        std::set<unsigned> neighbor_indices = rCellPopulation.GetNeighbouringNodeIndices(locIndex);
         
         if (neighbor_indices.empty())
         {
