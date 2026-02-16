@@ -166,6 +166,7 @@ fi
 
 # ---------- Build (serialised across array tasks) ----------
 BUILD_LOCK="${BUILD_DIR}/.build.lock"
+BUILD_STAMP="${BUILD_DIR}/.build_${SLURM_ARRAY_JOB_ID}.done"
 touch "${BUILD_LOCK}"
 
 echo ""
@@ -174,6 +175,12 @@ echo "Acquiring build lock (may wait for other tasks)..."
     flock -x 200
 
     echo "  Lock acquired by task ${SLURM_ARRAY_TASK_ID} at $(date)"
+
+    # Skip build if another task in this array already completed it
+    if [ -f "${BUILD_STAMP}" ]; then
+        echo "  Build already completed by a previous task. Skipping."
+        exit 0
+    fi
 
     # Clean stale FetchContent state
     rm -rf "${BUILD_DIR}/_deps/cellml_repo-subbuild"
@@ -187,12 +194,20 @@ echo "Acquiring build lock (may wait for other tasks)..."
                  cmake /home/chaste/src -DChaste_ERROR_ON_WARNING=OFF && \
                  make -j${SLURM_CPUS_PER_TASK} CryptBuddingApp"
 
+    BUILD_RC=$?
+    if [ ${BUILD_RC} -ne 0 ]; then
+        echo "ERROR: Build failed with exit code ${BUILD_RC}"
+        exit ${BUILD_RC}
+    fi
+
+    # Mark build as done for this array job
+    touch "${BUILD_STAMP}"
     echo "  Build completed by task ${SLURM_ARRAY_TASK_ID} at $(date)"
 ) 200>"${BUILD_LOCK}"
 
 BUILD_EXIT=$?
 if [ ${BUILD_EXIT} -ne 0 ]; then
-    echo "ERROR: Build failed with exit code ${BUILD_EXIT}"
+    echo "ERROR: Build failed (exit code ${BUILD_EXIT}). Aborting."
     exit ${BUILD_EXIT}
 fi
 
@@ -201,6 +216,16 @@ echo ""
 echo "Running CryptBuddingApp (model=${MODEL_TYPE}, stiffness=${ECM_STIFFNESS}, run=${RUN_NUMBER})..."
 
 APP_PATH="/home/chaste/build/projects/TissueMorphology/apps/CryptBuddingApp"
+
+# Verify binary exists before attempting to run
+HOST_APP_PATH="${BUILD_DIR}/projects/TissueMorphology/apps/CryptBuddingApp"
+if [ ! -f "${HOST_APP_PATH}" ]; then
+    echo "ERROR: CryptBuddingApp binary not found at ${HOST_APP_PATH}"
+    echo "  Build may have failed or placed the binary elsewhere."
+    echo "  Contents of ${BUILD_DIR}/projects/TissueMorphology/apps/:"
+    ls -la "${BUILD_DIR}/projects/TissueMorphology/apps/" 2>&1 || echo "  (directory does not exist)"
+    exit 1
+fi
 
 apptainer exec \
     --bind "${BUILD_DIR}:/home/chaste/build" \
