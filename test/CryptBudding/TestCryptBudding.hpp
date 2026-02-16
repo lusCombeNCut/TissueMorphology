@@ -1333,15 +1333,8 @@ private:
 
         simulator.AddForce(p_tension);
 
-        // Lumen pressure (OrganoidChaste sub-force, added as standalone force)
-        // LumenPressureSubForce extends AbstractSubForce which extends AbstractForce,
-        // so it can be added directly to the simulation. It applies an outward
-        // pressure on apical faces of the monolayer.
-        if (p.enableLumenPressure)
-        {
-            MAKE_PTR_ARGS(LumenPressureSubForce<3>, p_lumen_sub, (p.lumenPressure));
-            simulator.AddForce(p_lumen_sub);
-        }
+        // NOTE: LumenPressureSubForce is added in Phase 2 only.
+        // Adding it during relaxation destabilises the mesh → DIVERGED_ITS.
 
         // Basement membrane (TissueMorphology)
         MAKE_PTR(BasementMembraneForce<3>, p_bm);
@@ -1375,12 +1368,8 @@ private:
         p_gvol->SetReferenceTargetVolume(avgVol);
         simulator.AddSimulationModifier(p_gvol);
 
-        // Sloughing
-        if (p.enableSloughing)
-        {
-            AddBoundingBoxKillers<3>(simulator, population,
-                                    p.sphereRadius3dVertex * p.sloughRadiusFactor * 2.0);
-        }
+        // Note: no sloughing killers for vertex3d because
+        // MutableMonolayerVertexMesh does not support DeleteElementPriorToReMesh in 3D.
 
         // ================================================================
         // PHASE 1: RELAXATION (no growth)
@@ -1397,7 +1386,7 @@ private:
             }
 
             simulator.SetEndTime(p.relaxationTime);
-            std::cerr << "--- Phase 1: Relaxation (" << p.relaxationTime << " time-units) ---" << std::endl;
+            std::cerr << "--- Phase 1: Relaxation (" << p.relaxationTime << " hours) ---" << std::endl;
             simulator.Solve();
             std::cerr << "Relaxation complete. Cells: " << population.GetNumRealCells() << std::endl;
 
@@ -1427,6 +1416,13 @@ private:
             // Enable BM degradation
             p_bm->EnableEcmDegradation(p.ecmDegradationRate, p.ecmMaxRadius3d);
 
+            // Add lumen pressure in Phase 2 (not during relaxation)
+            if (p.enableLumenPressure)
+            {
+                MAKE_PTR_ARGS(LumenPressureSubForce<3>, p_lumen_sub, (p.lumenPressure));
+                simulator.AddForce(p_lumen_sub);
+            }
+
             // Add ECM guidance if enabled
             if (p.enableEcmGuidance && pEcmField)
             {
@@ -1440,7 +1436,7 @@ private:
                 simulator.AddForce(p_ecm);
             }
 
-            std::cerr << "--- Phase 2: Growth (" << p.endTime << " time-units) ---" << std::endl;
+            std::cerr << "--- Phase 2: Growth (" << p.endTime << " hours) ---" << std::endl;
             simulator.Solve();
         }
         else
