@@ -5,6 +5,7 @@
 # ---- Build artifacts ----
 build/
 test/Testing/
+output/
 
 # ---- Python caches ----
 __pycache__/

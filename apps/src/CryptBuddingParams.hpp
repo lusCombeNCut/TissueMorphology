@@ -182,11 +182,10 @@ struct CryptBuddingParams
         t1Threshold2d = (ecmStiffness < 2.0) ? 0.2 : 0.15;
         t2Threshold2d = 0.05;
 
-        // Model-specific defaults for dt/endTime/sampling if not overridden
+        // Model-specific defaults for dt/endTime if not overridden
         if (modelType == "node2d")
         {
             if (!dtOverridden) dt = 0.005;
-            samplingMultiple = 200;
         }
         else if (modelType == "vertex2d")
         {
@@ -194,25 +193,22 @@ struct CryptBuddingParams
                 dt = (ecmStiffness < 1.0) ? 0.0002
                    : (ecmStiffness < 5.0) ? 0.0005
                    :                        0.0005;
-            samplingMultiple = static_cast<unsigned>(1.0 / dt);
             if (!endTimeOverridden) endTime = 168.0;
         }
         else if (modelType == "node3d")
         {
             if (!dtOverridden) dt = 0.01;
-            samplingMultiple = 20;
             if (!endTimeOverridden) endTime = 168.0;
         }
         else if (modelType == "vertex3d")
         {
-            if (!dtOverridden) dt = 0.001;
-            samplingMultiple = 20;
+            if (!dtOverridden) dt = 0.0001;
             if (!endTimeOverridden) endTime = 100.0;
         }
-        else
-        {
-            samplingMultiple = 200;
-        }
+
+        // Compute samplingMultiple so every simulation outputs exactly 50 frames
+        const unsigned totalSteps = static_cast<unsigned>(std::round(endTime / dt));
+        samplingMultiple = std::max(1u, totalSteps / 50);
     }
 };
 
