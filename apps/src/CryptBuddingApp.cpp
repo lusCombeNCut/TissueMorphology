@@ -35,6 +35,7 @@
 
 #include "CryptBuddingParams.hpp"
 #include "CryptBuddingUtils.hpp"
+#include "PvdFixUtils.hpp"
 #include "RunNode2d.hpp"
 #include "RunVertex2d.hpp"
 #include "RunNode3d.hpp"
@@ -49,6 +50,7 @@ int main(int argc, char* argv[])
     ExecutableSupport::StandardStartup(&argc, &argv);
 
     int exit_code = ExecutableSupport::EXIT_OK;
+    std::string outputSubdir;  // Stored here so catch block can access it
 
     try
     {
@@ -78,22 +80,23 @@ int main(int argc, char* argv[])
             subdir << "CryptBudding/" << params.modelType
                    << "/stiffness_" << std::fixed << std::setprecision(1) << params.ecmStiffness
                    << "/run_" << params.runNumber;
+            outputSubdir = subdir.str();
 
             if (params.modelType == "node2d")
             {
-                RunNode2d(params, subdir.str());
+                RunNode2d(params, outputSubdir);
             }
             else if (params.modelType == "vertex2d")
             {
-                RunVertex2d(params, subdir.str());
+                RunVertex2d(params, outputSubdir);
             }
             else if (params.modelType == "node3d")
             {
-                RunNode3d(params, subdir.str());
+                RunNode3d(params, outputSubdir);
             }
             else if (params.modelType == "vertex3d")
             {
-                RunVertex3d(params, subdir.str());
+                RunVertex3d(params, outputSubdir);
             }
             else
             {
@@ -106,6 +109,36 @@ int main(int argc, char* argv[])
     {
         ExecutableSupport::PrintError(e.GetMessage());
         exit_code = ExecutableSupport::EXIT_ERROR;
+
+        // Failsafe: close any incomplete PVD files so that ParaView can
+        // still read partial results even when the simulation crashed.
+        if (!outputSubdir.empty())
+        {
+            std::cout << "\n  === PVD Failsafe: checking for incomplete PVD files ===" << std::endl;
+            try
+            {
+                FixAllPvdFiles(outputSubdir);
+            }
+            catch (...)
+            {
+                std::cerr << "  WARNING: PVD fix-up itself failed (non-critical)" << std::endl;
+            }
+        }
+    }
+
+    // Also run the PVD fix on normal exit, in case the simulation completed
+    // but the framework didn't close the file (e.g. two-phase simulations
+    // where the first phase's PVD may not be closed before the second starts).
+    if (!outputSubdir.empty())
+    {
+        try
+        {
+            FixAllPvdFiles(outputSubdir);
+        }
+        catch (...)
+        {
+            // Non-critical — don't fail the whole run
+        }
     }
 
     ExecutableSupport::WriteMachineInfoFile("machine_info");
