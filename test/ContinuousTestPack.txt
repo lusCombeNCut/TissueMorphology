@@ -8,6 +8,7 @@ CryptBudding/TestCryptBudding.hpp
 ECMForces/TestThresholdECMForce.hpp
 ECMForces/Test2dThresholdECMForce.hpp
 ECMForces/Test2dApicalConstriction.hpp
+ECMForces/Test3dVertexECMInteraction.hpp
 Invasion/Test2dInvasiveFront.hpp
 Invasion/Test2dDynamicECMInvasion.hpp
 Invasion/Test2dPainterReplication.hpp
