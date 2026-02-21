@@ -26,6 +26,7 @@
 #include "BasementMembraneForce.hpp"
 #include "LumenPressureForce.hpp"
 #include "ApicalConstrictionForce.hpp"
+#include "RadialVertexBasedDivisionRule.hpp"
 
 #include "VolumeTrackingModifier.hpp"
 #include "SimpleTargetAreaModifier.hpp"
@@ -91,6 +92,13 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
     }
 
     VertexBasedCellPopulation<2> population(*pMesh, cells);
+
+    // Use radial division rule to ensure daughters stay side-by-side
+    // within the monolayer (prevents radial stacking after T1 swaps)
+    boost::shared_ptr<AbstractVertexBasedDivisionRule<2>> p_div_rule(
+        new RadialVertexBasedDivisionRule<2>());
+    population.SetVertexBasedDivisionRule(p_div_rule);
+
     population.AddCellWriter<CellIdWriter>();
     population.AddCellWriter<CellAgesWriter>();
     population.AddCellWriter<CellVolumesWriter>();
@@ -111,7 +119,7 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
 
     MAKE_PTR(BasementMembraneForce<2>, p_bm);
     p_bm->SetBasementMembraneParameter(p.bmStiffnessVertex);
-    p_bm->SetBasementMembraneRadius(p.outerRadius2d + 2.0);
+    p_bm->SetBasementMembraneRadius(p.bmRadius2d);
     c_vector<double, 2> center2d = zero_vector<double>(2);
     p_bm->SetOrganoidCenter(center2d);
     p_bm->EnableEcmDegradation(p.ecmDegradationRate, p.outerRadius2d * 4.0);
@@ -121,7 +129,7 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
     {
         MAKE_PTR(LumenPressureForce<2>, p_lumen);
         p_lumen->SetPressureStrength(p.lumenPressure);
-        p_lumen->SetLumenEquilibriumRadius(p.outerRadius2d + 1.0);
+        p_lumen->SetLumenEquilibriumRadius(p.lumenEqRadius2d);
         p_lumen->SetTrackCenter(true);
         simulator.AddForce(p_lumen);
     }

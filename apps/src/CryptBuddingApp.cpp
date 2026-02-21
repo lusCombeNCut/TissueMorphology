@@ -5,7 +5,7 @@
  * Equivalent to TestCryptBudding.hpp but as a proper executable with
  * CLI arguments instead of environment variables.
  *
- * To rebuild: make -j8 -C Chaste/projects/TissueMorphology/apps src/CryptBuddingApp
+ * To rebuild: make -j8 -C projects/TissueMorphology/apps CryptBuddingApp
  * 
  * Usage:
  *    cd /<Project_Dir>/TissueMorphology/apps
@@ -75,9 +75,13 @@ int main(int argc, char* argv[])
             params.Finalise();
             PrintBanner(params);
 
-            // Build output directory
+            // Build output directory (includes git commit hash for traceability)
+#ifndef TM_GIT_HASH
+#define TM_GIT_HASH "unknown"
+#endif
             std::stringstream subdir;
-            subdir << "CryptBudding/" << params.modelType
+            subdir << "CryptBudding/" << TM_GIT_HASH
+                   << "/" << params.modelType
                    << "/stiffness_" << std::fixed << std::setprecision(1) << params.ecmStiffness
                    << "/run_" << params.runNumber;
             outputSubdir = subdir.str();
@@ -111,33 +115,10 @@ int main(int argc, char* argv[])
         exit_code = ExecutableSupport::EXIT_ERROR;
 
         // Failsafe: close any incomplete PVD files so that ParaView can
-        // still read partial results even when the simulation crashed.
         if (!outputSubdir.empty())
         {
             std::cout << "\n  === PVD Failsafe: checking for incomplete PVD files ===" << std::endl;
-            try
-            {
-                FixAllPvdFiles(outputSubdir);
-            }
-            catch (...)
-            {
-                std::cerr << "  WARNING: PVD fix-up itself failed (non-critical)" << std::endl;
-            }
-        }
-    }
-
-    // Also run the PVD fix on normal exit, in case the simulation completed
-    // but the framework didn't close the file (e.g. two-phase simulations
-    // where the first phase's PVD may not be closed before the second starts).
-    if (!outputSubdir.empty())
-    {
-        try
-        {
             FixAllPvdFiles(outputSubdir);
-        }
-        catch (...)
-        {
-            // Non-critical — don't fail the whole run
         }
     }
 

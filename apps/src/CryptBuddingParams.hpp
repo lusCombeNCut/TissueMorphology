@@ -50,12 +50,14 @@ struct CryptBuddingParams
     double bmStiffnessVertex;
     double bmRadius2d;
     double bmRadius3d;
+    double bmOffset3dVertex;
     double ecmDegradationRate;
     double ecmMaxRadius2d;
     double ecmMaxRadius3d;
 
     double lumenPressure;
     double lumenEqRadius2d;
+    double lumenEqRadius3d;
 
     double apicalConstrictionStrength;
 
@@ -126,13 +128,15 @@ struct CryptBuddingParams
 
         numCells3dNode       = 100;
         numCells3dVertex     = 200;
-        organoidRadius3d     = 25.0;
+        organoidRadius3d     = 10.0;
         shellThickness3d     = 3.0;
-        interactionCutoff3d  = 15.0;
-        sphereRadius3dVertex = 10.0;
+        interactionCutoff3d  = 8.0;
+        sphereRadius3dVertex = 10.0;  // derived from organoidRadius3d in Finalise()
+        bmOffset3dVertex     = 1.0;
 
         lumenPressure   = 2.0;
-        lumenEqRadius2d = organoidRadius2d + 1.0;
+        lumenEqRadius2d = 0.0;     // derived in Finalise()
+        lumenEqRadius3d = 0.0;     // derived in Finalise()
 
         apicalConstrictionStrength = 3.0;
 
@@ -173,11 +177,16 @@ struct CryptBuddingParams
 
         bmStiffnessNode   = ecmStiffness;
         bmStiffnessVertex = ecmStiffness * 0.5;
-        bmRadius2d        = organoidRadius2d + 2.0;
-        bmRadius3d        = 30.0;
+        bmRadius2d         = organoidRadius2d + 2.0;
+        bmRadius3d         = organoidRadius3d + 2.0;
         ecmDegradationRate = 0.02;
         ecmMaxRadius2d     = organoidRadius2d * 4.0;
-        ecmMaxRadius3d     = 80.0;
+        ecmMaxRadius3d     = organoidRadius3d * 4.0;
+
+        // Standardised derived radii — single source of truth from organoidRadius
+        sphereRadius3dVertex = organoidRadius3d;
+        lumenEqRadius2d      = organoidRadius2d + 1.0;
+        lumenEqRadius3d      = organoidRadius3d + 1.0;
 
         t1Threshold2d = (ecmStiffness < 2.0) ? 0.2 : 0.15;
         t2Threshold2d = 0.05;

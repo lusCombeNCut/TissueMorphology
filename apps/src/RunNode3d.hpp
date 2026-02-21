@@ -130,7 +130,7 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
     {
         MAKE_PTR(LumenPressureForce<3>, p_lumen);
         p_lumen->SetPressureStrength(p.lumenPressure);
-        p_lumen->SetLumenEquilibriumRadius(p.organoidRadius3d + 1.0);
+        p_lumen->SetLumenEquilibriumRadius(p.lumenEqRadius3d);
         p_lumen->SetTrackCenter(true);
         simulator.AddForce(p_lumen);
     }
@@ -173,9 +173,10 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
     MAKE_PTR(VolumeTrackingModifier<3>, p_vol);
     simulator.AddSimulationModifier(p_vol);
 
+    double totalSimTime = p.enableRelaxation ? (p.relaxationTime + p.endTime) : p.endTime;
     boost::shared_ptr<CryptBuddingSummaryModifier<3>> p_summary(
         new CryptBuddingSummaryModifier<3>(p.ecmStiffness, p.samplingMultiple,
-                                           p.relaxationTime + p.endTime));
+                                           totalSimTime));
     simulator.AddSimulationModifier(p_summary);
 
     if (p.enableRelaxation)

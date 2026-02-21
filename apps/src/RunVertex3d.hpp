@@ -170,9 +170,11 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     simulator.SetDt(p.dt);
     simulator.SetSamplingTimestepMultiple(p.samplingMultiple);
 
-    // Surface tension force with per-cell-type tensions via mutation state
+    // Surface tension force — per-cell-type (differential adhesion) or uniform
     MAKE_PTR(SurfaceTensionForce<3>, p_tension);
+    if (p.enableDifferentialAdhesion)
     {
+        // Per-cell-type tensions via mutation state
         std::map<boost::shared_ptr<AbstractCellMutationState>, std::array<double, 3>> mut_tension_map;
         mut_tension_map[p_stem_mut] = {{p.gammaApical * p.gammaStemScale,
                                         p.gammaBasal  * p.gammaStemScale,
@@ -186,7 +188,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
         p_tension->SetSurfaceTensionParametersByMutation(mut_tension_map);
         p_tension->UpdateSurfaceTensionsByMutation(&population);
 
-        std::cout << "  Surface tensions (apical, basal, lateral):" << std::endl;
+        std::cout << "  Surface tensions (apical, basal, lateral) — DIFFERENTIAL:" << std::endl;
         std::cout << "    Stem:    " << p.gammaApical * p.gammaStemScale << ", "
                   << p.gammaBasal * p.gammaStemScale << ", "
                   << p.gammaLateral * p.gammaStemScale << std::endl;
@@ -197,6 +199,19 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
                   << p.gammaBasal * p.gammaDiffScale << ", "
                   << p.gammaLateral * p.gammaDiffScale << std::endl;
     }
+    else
+    {
+        // Uniform tensions — all cells get the same gamma values
+        p_tension->CreateSurfaceTensionParametersForCells(p.gammaApical,
+                                                          p.gammaBasal,
+                                                          p.gammaLateral,
+                                                          pMesh);
+
+        std::cout << "  Surface tensions (apical, basal, lateral) — UNIFORM:" << std::endl;
+        std::cout << "    All:     " << p.gammaApical << ", "
+                  << p.gammaBasal << ", "
+                  << p.gammaLateral << std::endl;
+    }
     p_tension->SetSimulatedAnnealingParameters(0.0, 50.0, 0.0);
     p_tension->SetSimulationInstance(&simulator);
     simulator.AddForce(p_tension);
@@ -206,7 +221,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
 
     MAKE_PTR(BasementMembraneForce<3>, p_bm);
     p_bm->SetBasementMembraneParameter(p.bmStiffnessVertex);
-    p_bm->SetTargetRadius(p.sphereRadius3dVertex + height + 1.0);
+    p_bm->SetTargetRadius(p.organoidRadius3d + height + p.bmOffset3dVertex);
     simulator.AddForce(p_bm);
 
     // ------------------------------------------------------------------
@@ -237,9 +252,10 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     p_gvol->SetReferenceTargetVolume(avgVol);
     simulator.AddSimulationModifier(p_gvol);
 
+    double totalSimTime = p.enableRelaxation ? (p.relaxationTime + p.endTime) : p.endTime;
     boost::shared_ptr<CryptBuddingSummaryModifier<3>> p_summary(
         new CryptBuddingSummaryModifier<3>(p.ecmStiffness, p.samplingMultiple,
-                                           p.relaxationTime + p.endTime, avgVol));
+                                           totalSimTime, avgVol));
     simulator.AddSimulationModifier(p_summary);
 
     // Note: no sloughing killers for vertex3d because

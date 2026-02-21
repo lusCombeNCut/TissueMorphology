@@ -35,3 +35,17 @@
 # This allows us to build executables (apps) using the project.
 # Simply set the project name in the line below.
 chaste_do_apps_project(TissueMorphology)
+
+# Embed the TissueMorphology git commit hash into CryptBuddingApp
+execute_process(
+    COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}" rev-parse --short HEAD
+    OUTPUT_VARIABLE TM_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE GIT_RESULT
+)
+if(NOT GIT_RESULT EQUAL 0)
+    set(TM_GIT_HASH "unknown")
+endif()
+message(STATUS "TissueMorphology git hash: ${TM_GIT_HASH}")
+target_compile_definitions(CryptBuddingApp PRIVATE TM_GIT_HASH="${TM_GIT_HASH}")

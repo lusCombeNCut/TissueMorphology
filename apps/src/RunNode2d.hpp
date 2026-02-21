@@ -148,9 +148,10 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
     MAKE_PTR(VolumeTrackingModifier<2>, p_vol);
     simulator.AddSimulationModifier(p_vol);
 
+    double totalSimTime = p.enableRelaxation ? (p.relaxationTime + p.endTime) : p.endTime;
     boost::shared_ptr<CryptBuddingSummaryModifier<2>> p_summary(
         new CryptBuddingSummaryModifier<2>(p.ecmStiffness, p.samplingMultiple,
-                                           p.relaxationTime + p.endTime));
+                                           totalSimTime));
     simulator.AddSimulationModifier(p_summary);
 
     if (p.enableRelaxation)

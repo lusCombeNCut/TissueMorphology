@@ -161,8 +161,12 @@ inline boost::shared_ptr<MutableVertexMesh<2,2>> MakeAnnularVertexMesh(
 
 inline void PrintBanner(const CryptBuddingParams& p)
 {
+#ifndef TM_GIT_HASH
+#define TM_GIT_HASH "unknown"
+#endif
     std::cout << "\n============================================" << std::endl;
     std::cout << "  Crypt Budding Simulation" << std::endl;
+    std::cout << "  Git Commit:     " << TM_GIT_HASH << std::endl;
     std::cout << "  Model:          " << p.modelType << std::endl;
     std::cout << "  ECM Stiffness:  " << p.ecmStiffness << std::endl;
     std::cout << "  Run Number:     " << p.runNumber << std::endl;
