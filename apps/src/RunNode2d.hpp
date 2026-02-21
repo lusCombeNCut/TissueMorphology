@@ -26,12 +26,16 @@
 #include "BasementMembraneForce.hpp"
 #include "LumenPressureForce.hpp"
 #include "ApicalConstrictionForce.hpp"
+#include "CurvatureBendingForce.hpp"
+#include "CellPolarityForce.hpp"
+#include "RingTopologyTracker.hpp"
 
 #include "VolumeTrackingModifier.hpp"
 #include "CellIdWriter.hpp"
 #include "CellAgesWriter.hpp"
 #include "CellVolumesWriter.hpp"
 #include "CellProliferativeTypesCountWriter.hpp"
+#include "CellPolarityWriter.hpp"
 
 #include "CryptBuddingParams.hpp"
 #include "CryptBuddingSummaryModifier.hpp"
@@ -79,6 +83,12 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
         p_cell->GetCellData()->SetItem("volume", 1.0);
         p_cell->GetCellData()->SetItem("basement_membrane_stiffness", p.bmStiffnessNode);
         p_cell->GetCellData()->SetItem("is_apical", 1.0);
+
+        // Initialize cell polarity (2D: angle from x-axis pointing radially outward)
+        double theta_cell = 2.0 * M_PI * i / p.numCells2dNode;
+        p_cell->GetCellData()->SetItem("polarity_theta", theta_cell);
+        p_cell->GetCellData()->SetItem("polarity_phi", 0.0);  // unused in 2D
+
         cells.push_back(p_cell);
     }
 
@@ -87,6 +97,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
     population.AddCellWriter<CellIdWriter>();
     population.AddCellWriter<CellAgesWriter>();
     population.AddCellWriter<CellVolumesWriter>();
+    population.AddCellWriter<CellPolarityWriter>();
     population.AddCellPopulationCountWriter<CellProliferativeTypesCountWriter>();
 
     OffLatticeSimulation<2> simulator(population);
@@ -137,6 +148,38 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
         MAKE_PTR(ApicalConstrictionForce<2>, p_ac);
         p_ac->SetConstrictionStrength(p.apicalConstrictionStrength);
         simulator.AddForce(p_ac);
+    }
+
+    // Ring topology tracker - maintains stable circular neighbors
+    // Neighbors are determined by angular position at start, then updated only on division
+    boost::shared_ptr<RingTopologyTracker<2>> p_ring_tracker(new RingTopologyTracker<2>());
+    p_ring_tracker->SetCenter(center2d);
+    simulator.AddSimulationModifier(p_ring_tracker);
+
+    // Curvature bending force (Drasdo 2000) to enforce monolayer structure
+    if (p.enableCurvatureBending)
+    {
+        MAKE_PTR(CurvatureBendingForce<2>, p_curv);
+        p_curv->SetBendingStiffness(p.bendingStiffness);
+        p_curv->SetTargetRadius(p.organoidRadius2d);
+        p_curv->SetLumenExclusionStrength(p.lumenExclusionStrength);
+        p_curv->SetMinRadiusFraction(p.minRadiusFraction);
+        p_curv->SetNeighborCutoff(p.interactionCutoff2d);
+        p_curv->SetTrackCenter(true);
+        // Use ring topology for stable neighbors (not position-based)
+        p_curv->SetRingTopologyTracker(p_ring_tracker.get());
+        simulator.AddForce(p_curv);
+    }
+
+    // Cell polarity force for monolayer maintenance (ya||a-style)
+    if (p.enableCellPolarity)
+    {
+        MAKE_PTR(CellPolarityForce<2>, p_polarity);
+        p_polarity->SetBendingStrength(p.polarityBendingStrength);
+        p_polarity->SetPolarityAlignmentStrength(p.polarityAlignmentStrength);
+        p_polarity->SetInteractionCutoff(p.interactionCutoff2d);
+        p_polarity->SetInitializeRadially(true);
+        simulator.AddForce(p_polarity);
     }
 
     if (p.enableSloughing)

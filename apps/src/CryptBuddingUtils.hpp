@@ -192,6 +192,8 @@ inline void PrintBanner(const CryptBuddingParams& p)
     std::cout << "    ECM Guidance (3D):      " << (p.enableEcmGuidance ? "ON" : "OFF") << std::endl;
     std::cout << "    Sloughing:              " << (p.enableSloughing ? "ON" : "OFF") << std::endl;
     std::cout << "    Differential Adhesion:  " << (p.enableDifferentialAdhesion ? "ON" : "OFF") << std::endl;
+    std::cout << "    Curvature Bending:      " << (p.enableCurvatureBending ? "ON" : "OFF") << std::endl;
+    std::cout << "    Cell Polarity:          " << (p.enableCellPolarity ? "ON" : "OFF") << std::endl;
     std::cout << "============================================\n" << std::endl;
 }
 
@@ -199,8 +201,16 @@ inline void PrintUsage()
 {
     std::cout << "Usage: CryptBuddingApp -model <type> [options]\n"
               << "\nRequired:\n"
-              << "  -model <node2d|vertex2d|node3d|vertex3d>\n"
-              << "\nOptions:\n"
+              << "  -model <type>  where type is one of:\n"
+              << "      node2d   - Overlapping spheres (distance-based neighbors)\n"
+              << "      mesh2d   - Delaunay mesh (topological neighbors) [recommended]\n"
+              << "      vertex2d - Vertex model with polygonal cells\n"
+              << "      node3d   - 3D overlapping spheres\n"
+              << "      vertex3d - 3D vertex model\n"
+              << "\nConfig file (loads parameters without recompiling):\n"
+              << "  -config <file.ini>    Load parameters from INI file\n"
+              << "  -saveconfig <file>    Save current parameters to INI file and exit\n"
+              << "\nOptions (override config file values):\n"
               << "  -stiffness <double>   ECM stiffness (default: 5.0)\n"
               << "  -run <int>            run/replicate number (default: 0)\n"
               << "  -lumen <0|1>          lumen pressure (default: 1)\n"
@@ -209,10 +219,14 @@ inline void PrintUsage()
               << "  -relax <0|1>          relaxation phase (default: 1)\n"
               << "  -slough <0|1>         sloughing, 2D only (default: 1)\n"
               << "  -diffadh <0|1>        differential adhesion (default: 1)\n"
+              << "  -bending <0|1>        curvature bending force (default: 1)\n"
               << "  -endtime <double>     override end time\n"
               << "  -dt <double>          override timestep (relaxation in vertex3d)\n"
               << "  -dtgrow <double>      growth phase timestep, vertex3d (default: 0.002)\n"
               << "  -help                 print this message\n"
+              << "\nExample:\n"
+              << "  ./CryptBuddingApp -model mesh2d -config params.ini\n"
+              << "  ./CryptBuddingApp -model mesh2d -saveconfig default.ini\n"
               << std::endl;
 }
 
@@ -225,6 +239,22 @@ inline CryptBuddingParams ParseArguments(int argc, char* argv[])
     CryptBuddingParams p;
     p.SetDefaults();
 
+    // First pass: look for -config to load base parameters
+    for (int i = 1; i < argc; i++)
+    {
+        std::string arg = argv[i];
+        if (arg == "-config" && i + 1 < argc)
+        {
+            std::string configFile = argv[++i];
+            if (!p.LoadFromFile(configFile))
+            {
+                std::cerr << "Warning: Failed to load config file: " << configFile << std::endl;
+            }
+            break;  // Only process first -config
+        }
+    }
+
+    // Second pass: process all arguments (CLI overrides config file)
     for (int i = 1; i < argc; i++)
     {
         std::string arg = argv[i];
@@ -232,6 +262,26 @@ inline CryptBuddingParams ParseArguments(int argc, char* argv[])
         if (arg == "-help" || arg == "--help")
         {
             PrintUsage();
+            exit(0);
+        }
+        else if (arg == "-config" && i + 1 < argc)
+        {
+            ++i;  // Skip, already processed
+        }
+        else if (arg == "-saveconfig" && i + 1 < argc)
+        {
+            // Need model type first for proper defaults
+            for (int j = 1; j < argc; j++)
+            {
+                if (std::string(argv[j]) == "-model" && j + 1 < argc)
+                {
+                    p.modelType = argv[j + 1];
+                    break;
+                }
+            }
+            p.Finalise();
+            p.SaveToFile(argv[++i]);
+            std::cout << "Config saved. Exiting." << std::endl;
             exit(0);
         }
         else if (arg == "-model" && i + 1 < argc)
@@ -269,6 +319,10 @@ inline CryptBuddingParams ParseArguments(int argc, char* argv[])
         else if (arg == "-diffadh" && i + 1 < argc)
         {
             p.enableDifferentialAdhesion = (std::stoi(argv[++i]) != 0);
+        }
+        else if (arg == "-bending" && i + 1 < argc)
+        {
+            p.enableCurvatureBending = (std::stoi(argv[++i]) != 0);
         }
         else if (arg == "-endtime" && i + 1 < argc)
         {

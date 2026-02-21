@@ -27,6 +27,7 @@
 #include "BasementMembraneForce.hpp"
 #include "LumenPressureForce.hpp"
 #include "ApicalConstrictionForce.hpp"
+#include "CellPolarityForce.hpp"
 
 #include "DynamicECMContactGuidanceForce3d.hpp"
 #include "DynamicECMField3d.hpp"
@@ -35,6 +36,7 @@
 #include "CellIdWriter.hpp"
 #include "CellAgesWriter.hpp"
 #include "CellProliferativeTypesCountWriter.hpp"
+#include "CellPolarityWriter.hpp"
 
 #include "CryptBuddingParams.hpp"
 #include "CryptBuddingSummaryModifier.hpp"
@@ -85,6 +87,16 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
         p_cell->GetCellData()->SetItem("volume", 1.0);
         p_cell->GetCellData()->SetItem("basement_membrane_stiffness", p.bmStiffnessNode);
         p_cell->GetCellData()->SetItem("is_apical", 1.0);
+
+        // Initialize cell polarity (spherical coords pointing radially outward)
+        // Position on sphere gives natural polarity direction
+        double theta_cell = acos(1.0 - 2.0 * (i + 0.5) / p.numCells3dNode);  // phi from Fibonacci
+        double phi_cell = 2.0 * M_PI * i / golden;  // theta from Fibonacci (recalculated)
+        // Polarity theta = angle from z-axis (same as position theta)
+        // Polarity phi = azimuthal angle (same as position phi)
+        p_cell->GetCellData()->SetItem("polarity_theta", theta_cell);
+        p_cell->GetCellData()->SetItem("polarity_phi", phi_cell);
+
         cells.push_back(p_cell);
     }
 
@@ -92,6 +104,7 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
     population.SetAbsoluteMovementThreshold(50.0);
     population.AddCellWriter<CellIdWriter>();
     population.AddCellWriter<CellAgesWriter>();
+    population.AddCellWriter<CellPolarityWriter>();
     population.AddCellPopulationCountWriter<CellProliferativeTypesCountWriter>();
 
     OffLatticeSimulation<3> simulator(population);
@@ -140,6 +153,17 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
         MAKE_PTR(ApicalConstrictionForce<3>, p_ac);
         p_ac->SetConstrictionStrength(p.apicalConstrictionStrength);
         simulator.AddForce(p_ac);
+    }
+
+    // Cell polarity force for monolayer maintenance (ya||a-style)
+    if (p.enableCellPolarity)
+    {
+        MAKE_PTR(CellPolarityForce<3>, p_polarity);
+        p_polarity->SetBendingStrength(p.polarityBendingStrength);
+        p_polarity->SetPolarityAlignmentStrength(p.polarityAlignmentStrength);
+        p_polarity->SetInteractionCutoff(p.interactionCutoff3d);
+        p_polarity->SetInitializeRadially(true);
+        simulator.AddForce(p_polarity);
     }
 
     boost::shared_ptr<DynamicECMField3d> pEcmField;

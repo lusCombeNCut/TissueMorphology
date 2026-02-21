@@ -327,7 +327,42 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     }
     else
     {
+        // No relaxation — still need to configure growth-phase settings
+        double dt_grow = p.dtGrow;
+        unsigned sampling_grow = static_cast<unsigned>(std::max(1.0, 1.0 / dt_grow / 10.0));
+
         simulator.SetEndTime(p.endTime);
+        simulator.SetSamplingTimestepMultiple(sampling_grow);
+        simulator.SetDt(dt_grow);
+
+        p_tension->SetSimulatedAnnealingParameters(0.003, 1900000.0, 1.0);
+        p_tension->SetSimulationInstance(&simulator);
+        p_tension->SetPerformActiveT1Swaps(true);
+        p_tension->SetT1TransitionParameters(2.0, false);
+
+        p_bm->EnableEcmDegradation(p.ecmDegradationRate, p.ecmMaxRadius3d);
+
+        // Add lumen pressure
+        if (p.enableLumenPressure)
+        {
+            MAKE_PTR_ARGS(LumenPressureSubForce<3>, p_lumen_sub, (p.lumenPressure));
+            simulator.AddForce(p_lumen_sub);
+        }
+
+        // Add ECM guidance
+        if (p.enableEcmGuidance && pEcmField)
+        {
+            MAKE_PTR(DynamicECMContactGuidanceForce3d, p_ecm);
+            p_ecm->SetECMField(pEcmField);
+            p_ecm->SetBaseSpeed(p.ecmBaseSpeed);
+            p_ecm->SetECMSensitivity(1.0);
+            p_ecm->SetEnableDegradation(true);
+            p_ecm->SetEnableRemodeling(true);
+            p_ecm->SetEnableDeposition(false);
+            simulator.AddForce(p_ecm);
+        }
+
+        std::cout << "--- Single-phase Growth (" << p.endTime << " hours, dt=" << dt_grow << ") ---" << std::endl;
         simulator.Solve();
     }
 
