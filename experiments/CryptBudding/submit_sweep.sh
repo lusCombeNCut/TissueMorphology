@@ -39,28 +39,19 @@
 # ---------- Parse arguments ----------
 MODEL_TYPE="${1:-node2d}"
 
+# Determine which models to run
 case "$MODEL_TYPE" in
     all)
-        echo "Submitting all four model types..."
-        "$0" node2d
-        "$0" vertex2d
-        "$0" node3d
-        "$0" vertex3d
-        exit 0
+        MODELS_TO_RUN=(node2d vertex2d node3d vertex3d)
         ;;
     all2d)
-        echo "Submitting both 2D models..."
-        "$0" node2d
-        "$0" vertex2d
-        exit 0
+        MODELS_TO_RUN=(node2d vertex2d)
         ;;
     all3d)
-        echo "Submitting both 3D models..."
-        "$0" node3d
-        "$0" vertex3d
-        exit 0
+        MODELS_TO_RUN=(node3d vertex3d)
         ;;
     node2d|vertex2d|node3d|vertex3d)
+        MODELS_TO_RUN=("$MODEL_TYPE")
         ;;
     *)
         echo "ERROR: Unknown model type '$MODEL_TYPE'"
@@ -80,31 +71,35 @@ if [ -z "${SLURM_JOB_ID}" ]; then
     SWEEP_TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 
     echo ""
-    echo "=== Submitting ${MODEL_TYPE} sweep ==="
+    echo "=== Submitting sweep for: ${MODELS_TO_RUN[*]} ==="
     echo "  Timestamp: ${SWEEP_TIMESTAMP}"
+    echo ""
 
-    # Phase 1: single build job (1h, no array)
+    # Phase 1: Single build job (1h, no array) - shared by all models
     BUILD_JOB_ID=$(sbatch --parsable \
-        --job-name="Build_${MODEL_TYPE}" \
+        --job-name="Build_CryptBudding" \
         --array=0 \
         --time=01:00:00 \
         --export=ALL,SWEEP_PHASE=build,SWEEP_TIMESTAMP=${SWEEP_TIMESTAMP} \
-        --output="${BASE_LOG_DIR}/build_${MODEL_TYPE}_%j.out" \
-        --error="${BASE_LOG_DIR}/build_${MODEL_TYPE}_%j.err" \
-        "$0" "${MODEL_TYPE}")
+        --output="${BASE_LOG_DIR}/build_%j.out" \
+        --error="${BASE_LOG_DIR}/build_%j.err" \
+        "$0" "node2d")
 
-    echo "  Build job:  ${BUILD_JOB_ID}"
+    echo "  Build job:  ${BUILD_JOB_ID} (shared by all models)"
 
-    # Phase 2: simulation array (starts only after build succeeds)
-    SIM_JOB_ID=$(sbatch --parsable \
-        --job-name="Sim_${MODEL_TYPE}" \
-        --dependency=afterok:${BUILD_JOB_ID} \
-        --export=ALL,SWEEP_PHASE=run,SWEEP_TIMESTAMP=${SWEEP_TIMESTAMP} \
-        "$0" "${MODEL_TYPE}")
+    # Phase 2: Submit simulation array for each model (all depend on single build)
+    for model in "${MODELS_TO_RUN[@]}"; do
+        SIM_JOB_ID=$(sbatch --parsable \
+            --job-name="Sim_${model}" \
+            --dependency=afterok:${BUILD_JOB_ID} \
+            --export=ALL,SWEEP_PHASE=run,SWEEP_TIMESTAMP=${SWEEP_TIMESTAMP} \
+            "$0" "${model}")
 
-    echo "  Sim array:  ${SIM_JOB_ID}  (depends on build ${BUILD_JOB_ID})"
-    echo "  Logs dir:   ${BASE_LOG_DIR}/${SIM_JOB_ID}_${MODEL_TYPE}_${SWEEP_TIMESTAMP}/"
-    echo "  Output dir: /user/work/$(whoami)/sim_output/${SIM_JOB_ID}_${MODEL_TYPE}_${SWEEP_TIMESTAMP}/"
+        echo "  ${model} sim:   ${SIM_JOB_ID}  (depends on build ${BUILD_JOB_ID})"
+        echo "    Logs:   ${BASE_LOG_DIR}/${SIM_JOB_ID}_${model}_${SWEEP_TIMESTAMP}/"
+        echo "    Output: /user/work/$(whoami)/sim_output/${SIM_JOB_ID}_${model}_${SWEEP_TIMESTAMP}/"
+    done
+
     echo ""
     exit 0
 fi
