@@ -35,19 +35,12 @@ class RingTopologyTracker;
  * A force class implementing Drasdo-style curvature-dependent bending energy
  * to enforce monolayer structure in node-based organoid models.
  *
- * The force has two components:
+ * BENDING ENERGY (Drasdo 2000):
+ * For cells on the surface, computes discrete curvature from neighbors and
+ * applies restoring force when curvature deviates from target (1/R).
+ * E_bend = (κ_bend/2) * (κ_local - κ_target)²
  *
- * 1. BENDING ENERGY (Drasdo 2000):
- *    For cells on the surface, computes discrete curvature from neighbors and
- *    applies restoring force when curvature deviates from target (1/R).
- *    E_bend = (κ_bend/2) * (κ_local - κ_target)²
- *
- * 2. LUMEN EXCLUSION:
- *    Strong radial repulsion for any cell that drifts inside the expected
- *    lumen radius. This catches cells that escape the bending penalty.
- *    F_excl = k_excl * (r_min - r) * r_hat  for r < r_min
- *
- * Together these enforce that cells stay in a single-layer shell around the lumen.
+ * This helps enforce that cells stay in a single-layer shell around the lumen.
  */
 template<unsigned DIM>
 class CurvatureBendingForce : public AbstractForce<DIM>
@@ -64,12 +57,6 @@ private:
 
     /** Target shell radius (derived from target curvature) */
     double mTargetRadius;
-
-    /** Lumen exclusion strength - repels cells from entering lumen */
-    double mLumenExclusionStrength;
-
-    /** Minimum allowed distance from center (inner edge of shell) */
-    double mMinRadiusFraction;  // as fraction of target radius
 
     /** Maximum allowed distance from center (outer edge of shell) */
     double mMaxRadiusFraction;  // as fraction of target radius
@@ -93,8 +80,6 @@ private:
         archive & mBendingStiffness;
         archive & mTargetCurvature;
         archive & mTargetRadius;
-        archive & mLumenExclusionStrength;
-        archive & mMinRadiusFraction;
         archive & mMaxRadiusFraction;
         archive & mNeighborCutoff;
         archive & mOrganoidCenter;
@@ -111,8 +96,6 @@ public:
           mBendingStiffness(5.0),
           mTargetCurvature(0.125),   // 1/8.0 for radius 8.0
           mTargetRadius(8.0),
-          mLumenExclusionStrength(50.0),  // Strong repulsion from lumen
-          mMinRadiusFraction(0.7),   // Cells should stay outside 70% of target radius
           mMaxRadiusFraction(1.5),   // Allow some outward budding
           mNeighborCutoff(2.5),
           mTrackCenter(true),
@@ -137,16 +120,6 @@ public:
     {
         mTargetRadius = radius;
         mTargetCurvature = 1.0 / radius;
-    }
-
-    void SetLumenExclusionStrength(double strength)
-    {
-        mLumenExclusionStrength = strength;
-    }
-
-    void SetMinRadiusFraction(double fraction)
-    {
-        mMinRadiusFraction = fraction;
     }
 
     void SetMaxRadiusFraction(double fraction)
@@ -184,7 +157,6 @@ public:
     double GetBendingStiffness() const { return mBendingStiffness; }
     double GetTargetRadius() const { return mTargetRadius; }
     double GetTargetCurvature() const { return mTargetCurvature; }
-    double GetLumenExclusionStrength() const { return mLumenExclusionStrength; }
 
     /**
      * Update organoid center from cell population centroid.
@@ -346,8 +318,6 @@ public:
             UpdateOrganoidCenter(rCellPopulation);
         }
 
-        double minRadius = mMinRadiusFraction * mTargetRadius;
-
         // Build position map for neighbor lookup
         std::map<unsigned, c_vector<double, DIM>> nodePositions;
         for (typename AbstractCellPopulation<DIM>::Iterator cell_iter = rCellPopulation.Begin();
@@ -382,17 +352,7 @@ public:
 
             c_vector<double, DIM> force = zero_vector<double>(DIM);
 
-            // ===== COMPONENT 1: Lumen Exclusion Force =====
-            // Strong outward force if cell is inside the minimum radius
-            if (radius < minRadius)
-            {
-                double penetration = minRadius - radius;
-                // Quadratic penalty for deeper penetration
-                double forceMag = mLumenExclusionStrength * penetration * (1.0 + penetration / minRadius);
-                force += forceMag * radialUnit;
-            }
-
-            // ===== COMPONENT 2: Bending/Curvature Force (2D only) =====
+            // ===== Bending/Curvature Force (2D only) =====
             if constexpr (DIM == 2)
             {
                 if (mBendingStiffness > 0)
@@ -483,8 +443,6 @@ public:
         *rParamsFile << "\t\t\t<BendingStiffness>" << mBendingStiffness << "</BendingStiffness>\n";
         *rParamsFile << "\t\t\t<TargetRadius>" << mTargetRadius << "</TargetRadius>\n";
         *rParamsFile << "\t\t\t<TargetCurvature>" << mTargetCurvature << "</TargetCurvature>\n";
-        *rParamsFile << "\t\t\t<LumenExclusionStrength>" << mLumenExclusionStrength << "</LumenExclusionStrength>\n";
-        *rParamsFile << "\t\t\t<MinRadiusFraction>" << mMinRadiusFraction << "</MinRadiusFraction>\n";
         *rParamsFile << "\t\t\t<NeighborCutoff>" << mNeighborCutoff << "</NeighborCutoff>\n";
 
         AbstractForce<DIM>::OutputForceParameters(rParamsFile);

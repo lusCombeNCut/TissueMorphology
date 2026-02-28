@@ -51,6 +51,15 @@ except ImportError:
     HAS_SCIPY = False
     print("WARNING: scipy not available. Using simple peak detection.")
 
+# SimpleCryptCount method (optional)
+try:
+    from simple_crypt_count import (count_crypts_simple_method, DEFAULT_PARAMS,
+                                    load_final_outline, plot_debug_analysis,
+                                    plot_crypt_outline, load_final_vertex_boundary)
+    HAS_SIMPLE_CRYPT_COUNT = True
+except ImportError:
+    HAS_SIMPLE_CRYPT_COUNT = False
+
 
 # =====================================================================
 # Data loading
@@ -315,21 +324,90 @@ def count_crypts_3d(positions, min_prominence=1.0, min_sep_deg=30.0):
 
 
 # =====================================================================
+# Shape metrics
+# =====================================================================
+
+def compute_circularity_2d(positions):
+    """
+    Circularity of a 2D point cloud (convex hull).
+    circularity = 4*pi*Area / Perimeter^2
+    Returns 1.0 for a perfect circle, <1 for irregular shapes.
+    """
+    if len(positions) < 3:
+        return np.nan
+    try:
+        from scipy.spatial import ConvexHull
+        hull = ConvexHull(positions)
+        area = hull.volume  # in 2D, 'volume' gives area
+        verts = positions[hull.vertices]
+        perimeter = 0.0
+        for i in range(len(verts)):
+            perimeter += np.linalg.norm(verts[i] - verts[(i + 1) % len(verts)])
+        if perimeter < 1e-12:
+            return np.nan
+        return 4.0 * np.pi * area / (perimeter ** 2)
+    except Exception:
+        return np.nan
+
+
+def compute_sphericity_3d(positions):
+    """
+    Sphericity of a 3D point cloud (convex hull).
+    sphericity = (pi^(1/3) * (6V)^(2/3)) / A
+    Returns 1.0 for a perfect sphere, <1 for irregular shapes.
+    """
+    if len(positions) < 4:
+        return np.nan
+    try:
+        from scipy.spatial import ConvexHull
+        hull = ConvexHull(positions)
+        volume = hull.volume
+        area = hull.area
+        if area < 1e-12:
+            return np.nan
+        return (np.pi ** (1.0 / 3.0) * (6.0 * volume) ** (2.0 / 3.0)) / area
+    except Exception:
+        return np.nan
+
+
+# =====================================================================
 # Analysis
 # =====================================================================
 
-def analyse_model(base_dir, model_type):
+def analyse_model(base_dir, model_type, method='polar', simple_params=None, use_outline=False,
+                  debug_plots_dir=None):
     """
     Scan output directory for a model and count crypts per (stiffness, run).
-    Returns: dict { stiffness: [crypt_count, ...] }
+    
+    Args:
+        base_dir: Base output directory
+        model_type: Model type (node2d, vertex2d, etc.)
+        method: 'polar' (radial peak detection) or 'simple' (SimpleCryptCount)
+        simple_params: Parameters dict for SimpleCryptCount method
+        use_outline: If True, use VTP outline files for SimpleCryptCount method (2D only)
+        debug_plots_dir: If provided, save debug plots for run_1 of each stiffness
+    
+    Returns: dict { stiffness: [{'num_crypts': int, 'circularity': float,
+                                  'sphericity': float}, ...] }
     """
+    # Try both with and without 'CryptBudding' subdirectory
     model_dir = os.path.join(base_dir, 'CryptBudding', model_type)
+    if not os.path.isdir(model_dir):
+        model_dir = os.path.join(base_dir, model_type)
     if not os.path.isdir(model_dir):
         print(f"  Directory not found: {model_dir}")
         return {}
 
     dim = 3 if '3d' in model_type else 2
     results = defaultdict(list)
+    
+    # Validate method
+    if method == 'simple' and dim == 3:
+        print(f"  WARNING: SimpleCryptCount method only supports 2D. Falling back to polar.")
+        method = 'polar'
+    if method == 'simple' and not HAS_SIMPLE_CRYPT_COUNT:
+        print(f"  WARNING: SimpleCryptCount not available. Falling back to polar.")
+        method = 'polar'
 
     stiffness_dirs = sorted(glob.glob(os.path.join(model_dir, 'stiffness_*')))
     if not stiffness_dirs:
@@ -353,24 +431,76 @@ def analyse_model(base_dir, model_type):
                     search_dirs.append(sub)
 
             positions = None
+            outline_data = None
+            cell_types = None
+            
             for sd in search_dirs:
+                # Try to load outline data (for SimpleCryptCount with --use-outline)
+                if method == 'simple' and use_outline:
+                    try:
+                        outline_data, cell_types = load_final_outline(sd)
+                        break
+                    except (FileNotFoundError, ValueError):
+                        pass
+                
+                # Try to load vertex mesh boundary (for vertex2d model)
+                if method == 'simple' and 'vertex' in model_type and dim == 2:
+                    try:
+                        outline_data, cell_types = load_final_vertex_boundary(sd)
+                        break
+                    except (FileNotFoundError, ValueError, Exception):
+                        pass
+                
+                # Fall back to cell positions
                 try:
                     positions = load_final_positions(sd, dim)
                     break
                 except (FileNotFoundError, ValueError):
                     continue
 
-            if positions is None:
+            if positions is None and outline_data is None:
                 print(f"  SKIP {model_type}/stiffness_{stiffness}/{run_label}: no data")
                 continue
 
             if dim == 2:
-                n_crypts, _, _ = count_crypts_2d(positions)
+                if method == 'simple':
+                    # Use SimpleCryptCount method
+                    if outline_data is not None:
+                        # Use VTP outline or vertex mesh directly
+                        result = count_crypts_simple_method(outline_data, simple_params,
+                                                           boundary_is_ordered=True)
+                    else:
+                        # Use cell positions
+                        result = count_crypts_simple_method(positions, simple_params)
+                    n_crypts = result.num_crypts
+                    circ = result.circularity
+                    
+                    # Generate debug plot for run_1 of each stiffness
+                    if debug_plots_dir and run_label == 'run_1' and HAS_MATPLOTLIB:
+                        os.makedirs(debug_plots_dir, exist_ok=True)
+                        debug_path = os.path.join(debug_plots_dir, 
+                                                  f'{model_type}_stiffness_{stiffness}_crypt_outline.png')
+                        title = f'{model_type} - ECM Stiffness = {stiffness}'
+                        plot_crypt_outline(result, output_path=debug_path, title=title)
+                else:
+                    # Use polar radial detection method
+                    n_crypts, crypt_angles, profile_data = count_crypts_2d(positions)
+                    circ = compute_circularity_2d(positions)
+                sph = np.nan
             else:
                 n_crypts, _, _ = count_crypts_3d(positions)
+                circ = np.nan
+                sph = compute_sphericity_3d(positions)
 
-            results[stiffness].append(n_crypts)
-            print(f"  {model_type}/stiffness_{stiffness}/{run_label}: {n_crypts} crypts")
+            shape_val = circ if dim == 2 else sph
+            shape_name = 'circularity' if dim == 2 else 'sphericity'
+            results[stiffness].append({
+                'num_crypts': n_crypts,
+                'circularity': circ,
+                'sphericity': sph,
+            })
+            print(f"  {model_type}/stiffness_{stiffness}/{run_label}: "
+                  f"{n_crypts} crypts, {shape_name}={shape_val:.4f}")
 
     return dict(results)
 
@@ -402,7 +532,7 @@ def plot_single_model(results, model_type, output_path):
     color = COLORS.get(model_type, 'gray')
     label = LABELS.get(model_type, model_type)
     stiffnesses = sorted(results.keys())
-    data = [results[s] for s in stiffnesses]
+    data = [[d['num_crypts'] for d in results[s]] for s in stiffnesses]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
@@ -455,8 +585,9 @@ def plot_comparison(all_results, output_path):
         color = COLORS.get(model_type, 'gray')
         label = LABELS.get(model_type, model_type)
         stiffnesses = sorted(results.keys())
-        means = [np.mean(results[s]) for s in stiffnesses]
-        stds = [np.std(results[s]) for s in stiffnesses]
+        counts = {s: [d['num_crypts'] for d in results[s]] for s in stiffnesses}
+        means = [np.mean(counts[s]) for s in stiffnesses]
+        stds = [np.std(counts[s]) for s in stiffnesses]
         ax.errorbar(stiffnesses, means, yerr=stds,
                     fmt=f'{markers[i % len(markers)]}-',
                     color=color, capsize=5, markersize=8,
@@ -482,27 +613,45 @@ def plot_comparison(all_results, output_path):
 
 def print_summary_table(results, model_type):
     label = LABELS.get(model_type, model_type)
-    print(f"\n{'=' * 60}")
-    print(f"  {label}: Crypt Count Summary")
-    print(f"{'=' * 60}")
-    print(f"  {'Stiffness':>10}  {'N':>4}  {'Mean':>6}  {'SD':>6}  {'Min':>4}  {'Max':>4}")
-    print(f"  {'-'*10}  {'-'*4}  {'-'*6}  {'-'*6}  {'-'*4}  {'-'*4}")
+    dim = 3 if '3d' in model_type else 2
+    shape_name = 'Sphericity' if dim == 3 else 'Circularity'
+    shape_key = 'sphericity' if dim == 3 else 'circularity'
+
+    print(f"\n{'=' * 72}")
+    print(f"  {label}: Crypt Count & {shape_name} Summary")
+    print(f"{'=' * 72}")
+    print(f"  {'Stiffness':>10}  {'N':>4}  {'Mean':>6}  {'SD':>6}  "
+          f"{'Min':>4}  {'Max':>4}  {shape_name:>11}")
+    print(f"  {'-'*10}  {'-'*4}  {'-'*6}  {'-'*6}  "
+          f"{'-'*4}  {'-'*4}  {'-'*11}")
     for s in sorted(results.keys()):
-        c = results[s]
-        if c:
+        entries = results[s]
+        if entries:
+            c = [d['num_crypts'] for d in entries]
+            sv = [d[shape_key] for d in entries]
+            sv_valid = [v for v in sv if not np.isnan(v)]
+            sv_str = f"{np.mean(sv_valid):.4f}" if sv_valid else "N/A"
             print(f"  {s:10.1f}  {len(c):4d}  {np.mean(c):6.2f}  "
-                  f"{np.std(c):6.2f}  {min(c):4d}  {max(c):4d}")
-    print(f"{'=' * 60}\n")
+                  f"{np.std(c):6.2f}  {min(c):4d}  {max(c):4d}  "
+                  f"{sv_str:>11}")
+    print(f"{'=' * 72}\n")
 
 
 def save_results_csv(all_results, output_path):
     with open(output_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['model', 'stiffness', 'replicate', 'num_crypts'])
+        writer.writerow(['model', 'stiffness', 'replicate', 'num_crypts',
+                         'circularity', 'sphericity'])
         for model_type in sorted(all_results):
             for s in sorted(all_results[model_type]):
-                for i, count in enumerate(all_results[model_type][s]):
-                    writer.writerow([model_type, s, i, count])
+                for i, entry in enumerate(all_results[model_type][s]):
+                    circ = entry['circularity']
+                    sph = entry['sphericity']
+                    writer.writerow([
+                        model_type, s, i, entry['num_crypts'],
+                        f"{circ:.6f}" if not np.isnan(circ) else '',
+                        f"{sph:.6f}" if not np.isnan(sph) else '',
+                    ])
     print(f"  Saved CSV: {output_path}")
 
 
@@ -511,7 +660,10 @@ def load_summary_results(base_dir, model_type):
     Load time-series summary data from crypt_summary.csv files.
     Returns dict { stiffness: { run: DataFrame-like dict } }
     """
+    # Try both with and without 'CryptBudding' subdirectory
     model_dir = os.path.join(base_dir, 'CryptBudding', model_type)
+    if not os.path.isdir(model_dir):
+        model_dir = os.path.join(base_dir, model_type)
     results = defaultdict(dict)
 
     for s_dir in sorted(glob.glob(os.path.join(model_dir, 'stiffness_*'))):
@@ -545,10 +697,48 @@ def main():
                         default='crypt_budding_analysis',
                         help='Output directory for plots/CSVs')
     parser.add_argument('--min-prominence', type=float, default=0.5,
-                        help='Minimum radial prominence for crypt detection')
+                        help='Minimum radial prominence for crypt detection (polar method)')
+    
+    # SimpleCryptCount method options
+    parser.add_argument('--method', type=str, default='polar',
+                        choices=['polar', 'simple'],
+                        help='Crypt counting method: polar (radial peaks) or simple (SimpleCryptCount)')
+    parser.add_argument('--use-outline', action='store_true',
+                        help='Use VTP outline files for SimpleCryptCount (more accurate for 2D)')
+    parser.add_argument('--fourier-harmonics', type=int, default=25,
+                        help='Fourier harmonics for SimpleCryptCount method')
+    parser.add_argument('--min-area', type=float, default=0.0666,
+                        help='Min normalized crypt area (SimpleCryptCount)')
+    parser.add_argument('--max-area', type=float, default=0.2736,
+                        help='Max normalized crypt area (SimpleCryptCount)')
+    parser.add_argument('--min-arc-length', type=float, default=0.1466,
+                        help='Min normalized arc length (SimpleCryptCount)')
+    parser.add_argument('--debug-plots', action='store_true',
+                        help='Save debug plots showing crypt outlines for run_1 of each stiffness')
 
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Set up SimpleCryptCount parameters if using that method
+    simple_params = None
+    use_outline = args.use_outline if hasattr(args, 'use_outline') else False
+    
+    if args.method == 'simple':
+        if not HAS_SIMPLE_CRYPT_COUNT:
+            print("ERROR: SimpleCryptCount method not available. ")
+            print("       Check that simple_crypt_count.py is in the same directory.")
+            sys.exit(1)
+        simple_params = DEFAULT_PARAMS.copy()
+        simple_params['fourier_harmonics'] = args.fourier_harmonics
+        simple_params['min_area'] = args.min_area
+        simple_params['max_area'] = args.max_area
+        simple_params['min_arc_length'] = args.min_arc_length
+        print(f"Using SimpleCryptCount method with parameters:")
+        print(f"  Fourier harmonics: {simple_params['fourier_harmonics']}")
+        print(f"  Area range: [{simple_params['min_area']:.4f}, {simple_params['max_area']:.4f})")
+        print(f"  Min arc length: {simple_params['min_arc_length']:.4f}")
+        if use_outline:
+            print(f"  Using VTP outline files for boundary data")
 
     # Determine which models to analyse
     all_models = ['node2d', 'vertex2d', 'node3d', 'vertex3d']
@@ -558,10 +748,12 @@ def main():
         models = []
         for m in all_models:
             d = os.path.join(args.base_dir, 'CryptBudding', m)
+            if not os.path.isdir(d):
+                d = os.path.join(args.base_dir, m)
             if os.path.isdir(d):
                 models.append(m)
         if not models:
-            print(f"No model directories found under {args.base_dir}/CryptBudding/")
+            print(f"No model directories found under {args.base_dir}/")
             sys.exit(1)
 
     print(f"Models to analyse: {', '.join(models)}")
@@ -572,16 +764,28 @@ def main():
 
     for model_type in models:
         print(f"\n--- Analysing {LABELS.get(model_type, model_type)} ---")
-        results = analyse_model(args.base_dir, model_type)
+        
+        # Set up debug plots directory if requested (only for SimpleCryptCount method)
+        debug_plots_dir = None
+        if args.debug_plots and args.method == 'simple':
+            debug_plots_dir = os.path.join(args.output_dir, 'debug_plots')
+        
+        results = analyse_model(args.base_dir, model_type, 
+                               method=args.method, simple_params=simple_params,
+                               use_outline=use_outline,
+                               debug_plots_dir=debug_plots_dir)
 
         if results:
             all_results[model_type] = results
             print_summary_table(results, model_type)
 
             if HAS_MATPLOTLIB:
+                method_suffix = f'_{args.method}' if args.method != 'polar' else ''
+                if use_outline:
+                    method_suffix += '_outline'
                 plot_single_model(
                     results, model_type,
-                    os.path.join(args.output_dir, f'{model_type}_crypts_vs_stiffness.png'))
+                    os.path.join(args.output_dir, f'{model_type}_crypts_vs_stiffness{method_suffix}.png'))
 
     if all_results:
         save_results_csv(all_results,

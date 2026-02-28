@@ -29,7 +29,8 @@
 #include "FiniteThicknessRandomizedSphereMeshGenerator.hpp"
 #include "FiniteThicknessSimulation3d.hpp"
 
-#include "ContactInhibitionCellCycleModel.hpp"
+#include "UniformContactInhibitionCellCycleModel.hpp"
+#include "UniformContactInhibitionGenerationalCellCycleModel.hpp"
 #include "TransitCellProliferativeType.hpp"
 #include "StemCellProliferativeType.hpp"
 #include "DifferentiatedCellProliferativeType.hpp"
@@ -43,6 +44,8 @@
 
 #include "DynamicECMContactGuidanceForce3d.hpp"
 #include "DynamicECMField3d.hpp"
+#include "ECMConfinementForce3d.hpp"
+#include "ECMFieldWriter3d.hpp"
 
 #include "VolumeTrackingModifier.hpp"
 #include "GeometricalTargetVolumeModifier.hpp"
@@ -54,6 +57,9 @@
 
 #include "CryptBuddingParams.hpp"
 #include "CryptBuddingSummaryModifier.hpp"
+#include "SimProfiler.hpp"
+#include "TimedForce.hpp"
+#include "OutputFileHandler.hpp"
 
 void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
 {
@@ -107,10 +113,31 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
 
     for (unsigned i = 0; i < p.numCells3dVertex; i++)
     {
-        ContactInhibitionCellCycleModel* p_cycle = new ContactInhibitionCellCycleModel();
-        p_cycle->SetDimension(3);
-        p_cycle->SetQuiescentVolumeFraction(p.quiescentFraction);
-        p_cycle->SetEquilibriumVolume(avgVol);
+        // Create cell cycle model - generational or simple based on config
+        AbstractCellCycleModel* p_cycle_base;
+        if (p.enableGenerationalCascade)
+        {
+            auto* p_cycle = new UniformContactInhibitionGenerationalCellCycleModel();
+            p_cycle->SetDimension(3);
+            p_cycle->SetQuiescentVolumeFraction(p.quiescentFraction);
+            p_cycle->SetEquilibriumVolume(avgVol);
+            p_cycle->SetTotalCycleMin(p.stemCycleMin);
+            p_cycle->SetTotalCycleMax(p.stemCycleMax);
+            p_cycle->SetTransitCycleRatio(p.taCycleRatio);
+            p_cycle->SetMaxTransitGenerations(p.maxTransitGenerations);
+            p_cycle_base = p_cycle;
+        }
+        else
+        {
+            auto* p_cycle = new UniformContactInhibitionCellCycleModel();
+            p_cycle->SetDimension(3);
+            p_cycle->SetQuiescentVolumeFraction(p.quiescentFraction);
+            p_cycle->SetEquilibriumVolume(avgVol);
+            p_cycle->SetTotalCycleMin(p.stemCycleMin);
+            p_cycle->SetTotalCycleMax(p.stemCycleMax);
+            p_cycle->SetTransitCycleRatio(p.taCycleRatio);
+            p_cycle_base = p_cycle;
+        }
 
         // Uniform random cell type assignment across the organoid surface
         double u = RandomNumberGenerator::Instance()->ranf();
@@ -137,9 +164,21 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
             type_id = 2.0;
         }
 
-        CellPtr p_cell(new Cell(p_mut, p_cycle));
+        CellPtr p_cell(new Cell(p_mut, p_cycle_base));
         p_cell->SetCellProliferativeType(p_type);
         p_cell->GetCellData()->SetItem("cell_type_id", type_id);
+
+        // For generational model, set initial generation based on cell type
+        if (p.enableGenerationalCascade)
+        {
+            auto* p_gen_cycle = static_cast<UniformContactInhibitionGenerationalCellCycleModel*>(p_cycle_base);
+            if (p_type->IsType<StemCellProliferativeType>())
+                p_gen_cycle->SetGeneration(0);
+            else if (p_type->IsType<TransitCellProliferativeType>())
+                p_gen_cycle->SetGeneration(1);  // TA cells start at generation 1
+            else
+                p_gen_cycle->SetGeneration(p.maxTransitGenerations + 1);  // Already differentiated
+        }
 
         p_cell->SetBirthTime(-RandomNumberGenerator::Instance()->ranf() * 10.0);
         p_cell->InitialiseCellCycleModel();
@@ -214,7 +253,8 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     }
     p_tension->SetSimulatedAnnealingParameters(0.0, 50.0, 0.0);
     p_tension->SetSimulationInstance(&simulator);
-    simulator.AddForce(p_tension);
+    auto p_timed_tension = boost::make_shared<TimedForce<3>>(p_tension, "SurfaceTension");
+    simulator.AddForce(p_timed_tension);
 
     // NOTE: LumenPressureSubForce is added in Phase 2 only.
     // Adding it during relaxation destabilises the mesh → DIVERGED_ITS.
@@ -225,19 +265,33 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     simulator.AddForce(p_bm);
 
     // ------------------------------------------------------------------
-    // ECM guidance field (optional)
+    // ECM field (shared between confinement and guidance forces)
     // ------------------------------------------------------------------
     boost::shared_ptr<DynamicECMField3d> pEcmField;
-    if (p.enableEcmGuidance)
+    if (p.enableEcmConfinement || p.enableEcmGuidance)
     {
         pEcmField.reset(new DynamicECMField3d(
             "radial", p.ecmGridSpacing,
             -p.ecmDomainHalf, p.ecmDomainHalf,
             -p.ecmDomainHalf, p.ecmDomainHalf,
             -p.ecmDomainHalf, p.ecmDomainHalf));
-        pEcmField->SetDegradationRate(0.002);
+        pEcmField->SetDegradationRate(p.ecmDegradationRate);
+        pEcmField->SetDiffusionCoeff(p.ecmDiffusionCoeff);
         pEcmField->SetRemodelingRate(0.05);
         pEcmField->SetDepositionRate(0.0003);
+
+        // Clear ECM density inside the organoid
+        c_vector<double, 3> center3d = zero_vector<double>(3);
+        double ecm_clear_radius = (p.sphereRadius3dVertex + height) + 0.5 * p.ecmGridSpacing;
+        pEcmField->ClearDensityInsideRadius(center3d, ecm_clear_radius);
+    }
+
+    // ECM field VTI writer (added before solve so it captures from start)
+    if (pEcmField)
+    {
+        boost::shared_ptr<ECMFieldWriter3d> p_ecm_writer(
+            new ECMFieldWriter3d(pEcmField, p.samplingMultiple));
+        simulator.AddSimulationModifier(p_ecm_writer);
     }
 
     // ------------------------------------------------------------------
@@ -257,6 +311,14 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
         new CryptBuddingSummaryModifier<3>(p.ecmStiffness, p.samplingMultiple,
                                            totalSimTime, avgVol));
     simulator.AddSimulationModifier(p_summary);
+
+    // Continuous PVD shadow copies (keeps .pvd files valid for ParaView during simulation)
+    if (p.enableContinuousPvd)
+    {
+        boost::shared_ptr<ContinuousPvdModifier<3>> p_pvd(
+            new ContinuousPvdModifier<3>(p.samplingMultiple));
+        simulator.AddSimulationModifier(p_pvd);
+    }
 
     // Note: no sloughing killers for vertex3d because
     // MutableMonolayerVertexMesh does not support DeleteElementPriorToReMesh in 3D.
@@ -289,10 +351,9 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
 
         // Phase 2: Growth — use dtGrow (reduced for stability)
         double dt_grow = p.dtGrow;
-        unsigned sampling_grow = static_cast<unsigned>(std::max(1.0, 1.0 / dt_grow / 10.0));
 
         simulator.SetEndTime(p.relaxationTime + p.endTime);
-        simulator.SetSamplingTimestepMultiple(sampling_grow);
+        simulator.SetSamplingTimestepMultiple(p.samplingMultiple);
         simulator.SetDt(dt_grow);
 
         p_tension->SetSimulatedAnnealingParameters(0.003, 1900000.0, 1.0);
@@ -306,7 +367,8 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
         if (p.enableLumenPressure)
         {
             MAKE_PTR_ARGS(LumenPressureSubForce<3>, p_lumen_sub, (p.lumenPressure));
-            simulator.AddForce(p_lumen_sub);
+            auto p_timed_lumen = boost::make_shared<TimedForce<3>>(p_lumen_sub, "LumenPressureSub");
+            simulator.AddForce(p_timed_lumen);
         }
 
         // Add ECM guidance in Phase 2
@@ -322,6 +384,18 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
             simulator.AddForce(p_ecm);
         }
 
+        // Add ECM confinement in Phase 2
+        if (p.enableEcmConfinement && pEcmField)
+        {
+            auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
+            p_ecm_conf->SetECMField(pEcmField);
+            p_ecm_conf->SetConfinementStiffness(p.ecmStiffness);
+            p_ecm_conf->SetDegradationEnabled(true);
+            p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
+            p_ecm_conf->SetTrackCenter(true);
+            simulator.AddForce(p_ecm_conf);
+        }
+
         std::cout << "--- Phase 2: Growth (" << p.endTime << " hours, dt=" << dt_grow << ") ---" << std::endl;
         simulator.Solve();
     }
@@ -329,10 +403,9 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     {
         // No relaxation — still need to configure growth-phase settings
         double dt_grow = p.dtGrow;
-        unsigned sampling_grow = static_cast<unsigned>(std::max(1.0, 1.0 / dt_grow / 10.0));
 
         simulator.SetEndTime(p.endTime);
-        simulator.SetSamplingTimestepMultiple(sampling_grow);
+        simulator.SetSamplingTimestepMultiple(p.samplingMultiple);
         simulator.SetDt(dt_grow);
 
         p_tension->SetSimulatedAnnealingParameters(0.003, 1900000.0, 1.0);
@@ -346,7 +419,8 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
         if (p.enableLumenPressure)
         {
             MAKE_PTR_ARGS(LumenPressureSubForce<3>, p_lumen_sub, (p.lumenPressure));
-            simulator.AddForce(p_lumen_sub);
+            auto p_timed_lumen = boost::make_shared<TimedForce<3>>(p_lumen_sub, "LumenPressureSub");
+            simulator.AddForce(p_timed_lumen);
         }
 
         // Add ECM guidance
@@ -362,12 +436,33 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
             simulator.AddForce(p_ecm);
         }
 
+        // Add ECM confinement
+        if (p.enableEcmConfinement && pEcmField)
+        {
+            auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
+            p_ecm_conf->SetECMField(pEcmField);
+            p_ecm_conf->SetConfinementStiffness(p.ecmStiffness);
+            p_ecm_conf->SetDegradationEnabled(true);
+            p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
+            p_ecm_conf->SetTrackCenter(true);
+            simulator.AddForce(p_ecm_conf);
+        }
+
         std::cout << "--- Single-phase Growth (" << p.endTime << " hours, dt=" << dt_grow << ") ---" << std::endl;
         simulator.Solve();
     }
 
     unsigned final_cells = population.GetNumRealCells();
     std::cout << "\nSIMULATION COMPLETE  |  Final cells: " << final_cells << std::endl;
+
+    // Print profiling summary
+    SimProfiler::Instance().PrintSummary();
+
+    // Also save CSV for further analysis
+    OutputFileHandler prof_handler(outputDir, false);
+    std::string profCsvPath = prof_handler.GetOutputDirectoryFullPath() + "profiler.csv";
+    SimProfiler::Instance().WriteSummaryCSV(profCsvPath);
+
     if (final_cells == 0)
         EXCEPTION("Simulation ended with zero cells");
 }

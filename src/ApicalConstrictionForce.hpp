@@ -42,6 +42,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "AbstractForce.hpp"
 #include "AbstractCellPopulation.hpp"
 #include "VertexBasedCellPopulation.hpp"
+#include "SimProfiler.hpp"
 
 /**
  * A force class to model apical constriction in epithelial tissues.
@@ -112,6 +113,7 @@ public:
      */
     void AddForceContribution(AbstractCellPopulation<DIM>& rCellPopulation)
     {
+        ScopedTimer timer("ApicalConstriction");
         // Initialize reference areas if not done
         if (mReferenceAreas.empty())
         {

@@ -43,6 +43,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "AbstractCellPopulation.hpp"
 #include "VertexBasedCellPopulation.hpp"
 #include "SimulationTime.hpp"
+#include "SimProfiler.hpp"
 
 /**
  * A force class to model basement membrane interactions in organoid formation.

@@ -80,6 +80,9 @@ private:
     /** ECM deposition rate */
     double mDepositionRate;
     
+    /** Diffusion coefficient for density smoothing */
+    double mDiffusionCoeff;
+    
     /** Initial ECM orientation type */
     std::string mInitialECMType;
     
@@ -259,6 +262,7 @@ public:
           mRemodelingRate(0.05),
           mDegradationRate(0.001),
           mDepositionRate(0.0005),
+          mDiffusionCoeff(0.01),
           mInitialECMType(ecmType),
           mNx(0), mNy(0), mNz(0)
     {
@@ -425,7 +429,6 @@ public:
     void DiffuseECM(double dt)
     {
         std::map<GridIndex, ECMGridCell> new_grid = mGrid;
-        double diffusion_coeff = 0.01;
         
         for (auto& entry : mGrid)
         {
@@ -460,11 +463,11 @@ public:
             
             // Diffuse density
             new_grid[entry.first].density = entry.second.density +
-                diffusion_coeff * dt * (avg_density - entry.second.density);
+                mDiffusionCoeff * dt * (avg_density - entry.second.density);
             
             // Diffuse fiber direction (and re-normalize)
             c_vector<double, 3> new_dir = entry.second.fiber_direction +
-                diffusion_coeff * dt * (avg_dir - entry.second.fiber_direction);
+                mDiffusionCoeff * dt * (avg_dir - entry.second.fiber_direction);
             double nmag = norm_2(new_dir);
             if (nmag > 1e-10)
             {
@@ -510,6 +513,32 @@ public:
     void SetRemodelingRate(double rate) { mRemodelingRate = rate; }
     void SetDegradationRate(double rate) { mDegradationRate = rate; }
     void SetDepositionRate(double rate) { mDepositionRate = rate; }
+    void SetDiffusionCoeff(double coeff) { mDiffusionCoeff = coeff; }
+    
+    /**
+     * Clear ECM density inside a sphere of given radius centered at `center`.
+     * Used to create a lumen cavity inside the organoid at initialisation.
+     */
+    void ClearDensityInsideRadius(const c_vector<double, 3>& center, double radius)
+    {
+        double r2 = radius * radius;
+        for (auto& entry : mGrid)
+        {
+            int i = std::get<0>(entry.first);
+            int j = std::get<1>(entry.first);
+            int k = std::get<2>(entry.first);
+            double x = mXMin + i * mGridSpacing;
+            double y = mYMin + j * mGridSpacing;
+            double z = mZMin + k * mGridSpacing;
+            double dx = x - center[0];
+            double dy = y - center[1];
+            double dz = z - center[2];
+            if (dx*dx + dy*dy + dz*dz < r2)
+            {
+                entry.second.density = 0.0;
+            }
+        }
+    }
     
     /** Getters for grid metadata */
     double GetGridSpacing() const { return mGridSpacing; }
@@ -598,6 +627,93 @@ public:
         vtifile << "  </ImageData>\n";
         vtifile << "</VTKFile>\n";
         
+        vtifile.close();
+    }
+
+    /**
+     * Write a single z-slice (at the center of the grid) to a VTI file.
+     * The output is a 2D image (Nx × Ny × 1) which is much cheaper to
+     * store than the full 3D volume while still showing the ECM state.
+     *
+     * @param filename  Path to the output .vti file
+     * @param time      Current simulation time (for metadata)
+     * @param kSlice    z-index of the slice to write; -1 means use the
+     *                  center slice (mNz / 2)
+     */
+    void WriteSliceToVTI(const std::string& filename, double time,
+                         int kSlice = -1) const
+    {
+        if (kSlice < 0)
+        {
+            kSlice = mNz / 2;
+        }
+        kSlice = std::max(0, std::min(kSlice, mNz - 1));
+
+        std::ofstream vtifile(filename);
+        if (!vtifile.is_open())
+        {
+            EXCEPTION("Could not open file: " + filename);
+        }
+
+        double sliceZOrigin = mZMin + kSlice * mGridSpacing;
+
+        vtifile << "<?xml version=\"1.0\"?>\n";
+        vtifile << "<VTKFile type=\"ImageData\" version=\"1.0\" byte_order=\"LittleEndian\">\n";
+        vtifile << "  <ImageData WholeExtent=\"0 " << (mNx - 1) << " 0 " << (mNy - 1)
+                << " 0 0\" ";
+        vtifile << "Origin=\"" << mXMin << " " << mYMin << " " << sliceZOrigin << "\" ";
+        vtifile << "Spacing=\"" << mGridSpacing << " " << mGridSpacing << " " << mGridSpacing << "\">\n";
+        vtifile << "    <Piece Extent=\"0 " << (mNx - 1) << " 0 " << (mNy - 1)
+                << " 0 0\">\n";
+        vtifile << "      <PointData Vectors=\"ecm_fiber_direction\">\n";
+
+        // ECM density
+        vtifile << "        <DataArray type=\"Float32\" Name=\"ecm_density\" format=\"ascii\">\n";
+        vtifile << "          ";
+        for (int j = 0; j < mNy; j++)
+            for (int i = 0; i < mNx; i++)
+            {
+                auto it = mGrid.find(std::make_tuple(i, j, kSlice));
+                vtifile << (it != mGrid.end() ? it->second.density : 0.0) << " ";
+            }
+        vtifile << "\n        </DataArray>\n";
+
+        // ECM anisotropy
+        vtifile << "        <DataArray type=\"Float32\" Name=\"ecm_anisotropy\" format=\"ascii\">\n";
+        vtifile << "          ";
+        for (int j = 0; j < mNy; j++)
+            for (int i = 0; i < mNx; i++)
+            {
+                auto it = mGrid.find(std::make_tuple(i, j, kSlice));
+                vtifile << (it != mGrid.end() ? it->second.anisotropy : 0.0) << " ";
+            }
+        vtifile << "\n        </DataArray>\n";
+
+        // ECM fiber direction
+        vtifile << "        <DataArray type=\"Float32\" Name=\"ecm_fiber_direction\" "
+                << "NumberOfComponents=\"3\" format=\"ascii\">\n";
+        vtifile << "          ";
+        for (int j = 0; j < mNy; j++)
+            for (int i = 0; i < mNx; i++)
+            {
+                auto it = mGrid.find(std::make_tuple(i, j, kSlice));
+                if (it != mGrid.end())
+                {
+                    const auto& fd = it->second.fiber_direction;
+                    vtifile << fd[0] << " " << fd[1] << " " << fd[2] << " ";
+                }
+                else
+                {
+                    vtifile << "0 0 0 ";
+                }
+            }
+        vtifile << "\n        </DataArray>\n";
+
+        vtifile << "      </PointData>\n";
+        vtifile << "    </Piece>\n";
+        vtifile << "  </ImageData>\n";
+        vtifile << "</VTKFile>\n";
+
         vtifile.close();
     }
 };

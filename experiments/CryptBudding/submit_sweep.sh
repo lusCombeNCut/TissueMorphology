@@ -232,7 +232,7 @@ fi
 # ---------- Stiffness sweep parameters ----------
 STIFFNESS_VALUES=(0.5 1.0 2.0 5.0 10.0 20.0 50.0)
 NUM_STIFFNESS=${#STIFFNESS_VALUES[@]}
-NUM_REPLICATES=1
+NUM_REPLICATES=10
 
 # Decode array task ID → (stiffness_index, replicate)
 STIFFNESS_INDEX=$((SLURM_ARRAY_TASK_ID / NUM_REPLICATES))
@@ -268,12 +268,28 @@ LOG_FILE="${LOG_DIR}/s${ECM_STIFFNESS}_r${RUN_NUMBER}.log"
 exec > >(tee -a "${LOG_FILE}")
 exec 2>&1
 
+# ---------- Resolve config file ----------
+case "$MODEL_TYPE" in
+    node2d)   CONFIG_FILENAME="params-Node2d.ini"   ;;
+    vertex2d) CONFIG_FILENAME="params-Vertex2d.ini" ;;
+    node3d)   CONFIG_FILENAME="params-Node3d.ini"   ;;
+    vertex3d) CONFIG_FILENAME="params-Vertex3d.ini" ;;
+esac
+HOST_CONFIG_PATH="${SOURCE_DIR}/apps/${CONFIG_FILENAME}"
+CONTAINER_CONFIG_PATH="/home/chaste/src/projects/TissueMorphology/apps/${CONFIG_FILENAME}"
+
+if [ ! -f "${HOST_CONFIG_PATH}" ]; then
+    echo "ERROR: Config file not found at ${HOST_CONFIG_PATH}"
+    exit 1
+fi
+
 # ---------- Job info ----------
 echo "============================================"
 echo "  Crypt Budding Stiffness Sweep (App)"
 echo "============================================"
 echo "  Job ID:          ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 echo "  Model:           ${MODEL_TYPE}"
+echo "  Config file:     ${CONFIG_FILENAME}"
 echo "  ECM Stiffness:   ${ECM_STIFFNESS}"
 echo "  Replicate:       ${RUN_NUMBER}"
 echo "  Node:            $(hostname)"
@@ -294,7 +310,7 @@ fi
 
 # ---------- Run simulation ----------
 echo ""
-echo "Running CryptBuddingApp (model=${MODEL_TYPE}, stiffness=${ECM_STIFFNESS}, run=${RUN_NUMBER})..."
+echo "Running CryptBuddingApp (config=${CONFIG_FILENAME}, stiffness=${ECM_STIFFNESS}, run=${RUN_NUMBER})..."
 
 apptainer exec \
     --bind "${BUILD_DIR}:/home/chaste/build" \
@@ -304,7 +320,7 @@ apptainer exec \
     --env CHASTE_TEST_OUTPUT=/home/chaste/output \
     "${SIF_IMAGE}" \
     "${APP_PATH}" \
-        -model "${MODEL_TYPE}" \
+        -config "${CONTAINER_CONFIG_PATH}" \
         -stiffness "${ECM_STIFFNESS}" \
         -run "${RUN_NUMBER}"
 

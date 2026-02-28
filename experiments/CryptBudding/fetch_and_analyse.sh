@@ -213,8 +213,9 @@ if [[ "$SKIP_ANALYSIS" == false ]]; then
     MODELS_TO_MERGE=("$MODEL_FILTER")
   else
     # Auto-detect models from extracted directories
+    # App output: s*_r*/CryptBudding/<git_hash>/<model>/stiffness_*/run_*
     for model in node2d vertex2d node3d vertex3d; do
-      if ls -d "$OUTPUT_DIR"/s*_r*/CryptBudding/"$model" 2>/dev/null | head -1 | grep -q .; then
+      if ls -d "$OUTPUT_DIR"/s*_r*/CryptBudding/*/"$model" 2>/dev/null | head -1 | grep -q .; then
         MODELS_TO_MERGE+=("$model")
       fi
     done
@@ -227,7 +228,8 @@ if [[ "$SKIP_ANALYSIS" == false ]]; then
     MERGED_MODEL="$MERGED_DIR/CryptBudding/$model"
     
     # Create symlinks at the run level
-    for sdir in "$OUTPUT_DIR"/s*_r*/CryptBudding/"$model"/stiffness_*; do
+    # App output: s*_r*/CryptBudding/<git_hash>/<model>/stiffness_*/run_*
+    for sdir in "$OUTPUT_DIR"/s*_r*/CryptBudding/*/"$model"/stiffness_*; do
       [[ -d "$sdir" ]] || continue
       
       stiff=$(basename "$sdir")

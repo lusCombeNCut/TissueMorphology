@@ -40,6 +40,7 @@
 #include "RunVertex2d.hpp"
 #include "RunNode3d.hpp"
 #include "RunVertex3d.hpp"
+#include "OutputFileHandler.hpp"
 
 #include <sstream>
 #include <iomanip>
@@ -85,6 +86,11 @@ int main(int argc, char* argv[])
                    << "/stiffness_" << std::fixed << std::setprecision(1) << params.ecmStiffness
                    << "/run_" << params.runNumber;
             outputSubdir = subdir.str();
+
+            // Save a copy of the parameters to the output folder for reference
+            OutputFileHandler output_handler(outputSubdir, false);
+            std::string params_path = output_handler.GetOutputDirectoryFullPath() + "params.ini";
+            params.SaveToFile(params_path);
 
             if (params.modelType == "node2d")
             {

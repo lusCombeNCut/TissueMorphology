@@ -40,6 +40,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "SimulationTime.hpp"
 #include "RandomNumberGenerator.hpp"
 #include "DynamicECMField3d.hpp"
+#include "SimProfiler.hpp"
 
 /**
  * 3D Dynamic ECM Contact Guidance Force
@@ -137,6 +138,7 @@ public:
      */
     void AddForceContribution(AbstractCellPopulation<3>& rCellPopulation)
     {
+        ScopedTimer timer("ECMGuidance3d");
         if (!mpECMField)
         {
             EXCEPTION("ECM field not set! Call SetECMField() before simulation.");

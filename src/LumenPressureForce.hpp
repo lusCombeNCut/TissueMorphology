@@ -38,29 +38,32 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "AbstractForce.hpp"
 #include "AbstractCellPopulation.hpp"
 #include "VertexBasedCellPopulation.hpp"
+#include "SimulationTime.hpp"
+#include "SimProfiler.hpp"
+#include "RingTopologyTracker.hpp"
 
 /**
- * A force class modelling hydrostatic/osmotic pressure from the organoid lumen.
+ * Hydrostatic lumen pressure force using pressure–volume work.
  *
- * In a real organoid the lumen is maintained by apical fluid secretion and
- * tight-junction-mediated osmotic pressure. This force provides a simple
- * outward radial pressure on all cells, pushing them away from the organoid
- * centre. Combined with the inward BasementMembraneForce it creates the
- * apical (inner) / basal (outer) tension that maintains the epithelial shell.
+ * Models the lumen as a fluid-filled cavity exerting uniform hydrostatic
+ * pressure P on the apical (inner) surface of the epithelium. 
  *
- * The force acts only on cells within the organoid's equilibrium radius. Cells
- * that have budded outward beyond that radius feel no additional lumen pressure
- * (the bud may form its own micro-lumen but that's not modelled here).
+ * Two modes are supported:
  *
- * Biology:
- *   - Apical surface faces the lumen (inner)
- *   - Basal surface faces the ECM (outer)
- *   - Lumen pressure ↔ cell proliferative pressure → budding instability
+ * 1. CONSTANT PRESSURE MODE (default, mUseTargetVolume=false):
+ *    F_i = P × A_i × n̂_i
+ *    where P is constant.
  *
- * Parameters:
- *   mPressureStrength    — magnitude of outward radial force per cell
- *   mLumenEquilibriumRadius — the "relaxed" lumen surface radius
- *   mLumenCenter         — center of the lumen (auto-tracked from centroid)
+ * 2. TARGET VOLUME MODE (mUseTargetVolume=true):
+ *    Models an incompressible fluid with slowly growing volume.
+ *    Target volume grows as: V₀(t) = V_initial × (1 + growth_rate × t)
+ *    Pressure is: P = bulk_modulus × (V₀ - V_current) / V₀
+ *    This creates feedback: if lumen is compressed below target, pressure increases.
+ *
+ * Surface area computation:
+ *   2D (ring): A_i = ½(|x_L − x_i| + |x_R − x_i|) where L,R are ring
+ *              neighbors from RingTopologyTracker (arc-length element).
+ *   3D (sphere, no ring): A_i = 4πr²/N (equal Voronoi partition estimate).
  */
 template<unsigned DIM>
 class LumenPressureForce : public AbstractForce<DIM>
@@ -69,38 +72,66 @@ class LumenPressureForce : public AbstractForce<DIM>
 
 private:
 
-    /** Pressure strength (outward force magnitude per unit displacement) */
-    double mPressureStrength;
+    /** Hydrostatic lumen pressure (constant mode) or bulk modulus (target volume mode) */
+    double mPressure;
 
-    /** Equilibrium radius of the lumen surface */
-    double mLumenEquilibriumRadius;
-
-    /** Center of the lumen */
+    /** Center of the lumen (auto-tracked from centroid if mTrackCenter=true) */
     c_vector<double, DIM> mLumenCenter;
 
     /** Whether to auto-track lumen center from population centroid */
     bool mTrackCenter;
 
+    /** Pointer to ring topology tracker (2D only, for computing arc lengths) */
+    const RingTopologyTracker<DIM>* mpRingTracker;
+
+    // ---- Target volume mode parameters ----
+    
+    /** Whether to use target volume mode (incompressible fluid) */
+    bool mUseTargetVolume;
+    
+    /** Initial target lumen volume/area */
+    double mInitialTargetVolume;
+    
+    /** Rate of volume growth (fraction per hour, e.g. 0.1 = 10% per hour) */
+    double mVolumeGrowthRate;
+    
+    /** Bulk modulus - how stiff the fluid is (pressure per fractional compression) */
+    double mBulkModulus;
+    
+    /** Current simulation time (updated each timestep) */
+    double mCurrentTime;
+    
+    /** Whether initial volume has been set */
+    bool mInitialVolumeSet;
+
     template<class Archive>
     void serialize(Archive & archive, const unsigned int version)
     {
         archive & boost::serialization::base_object<AbstractForce<DIM> >(*this);
-        archive & mPressureStrength;
-        archive & mLumenEquilibriumRadius;
+        archive & mPressure;
         archive & mLumenCenter;
         archive & mTrackCenter;
+        archive & mUseTargetVolume;
+        archive & mInitialTargetVolume;
+        archive & mVolumeGrowthRate;
+        archive & mBulkModulus;
+        archive & mCurrentTime;
+        archive & mInitialVolumeSet;
     }
 
 public:
 
-    /**
-     * Constructor.
-     */
     LumenPressureForce()
         : AbstractForce<DIM>(),
-          mPressureStrength(1.0),
-          mLumenEquilibriumRadius(5.0),
-          mTrackCenter(true)
+          mPressure(1.0),
+          mTrackCenter(true),
+          mpRingTracker(nullptr),
+          mUseTargetVolume(false),
+          mInitialTargetVolume(0.0),
+          mVolumeGrowthRate(0.05),  // 5% per hour default
+          mBulkModulus(10.0),
+          mCurrentTime(0.0),
+          mInitialVolumeSet(false)
     {
         for (unsigned i = 0; i < DIM; i++)
         {
@@ -111,106 +142,199 @@ public:
     virtual ~LumenPressureForce() {}
 
     /**
-     * Add lumen pressure force contribution.
+     * Compute the current lumen volume/area from cell positions.
+     * In 2D, uses the shoelace formula for the polygon area.
+     * In 3D, estimates volume from mean radius.
+     */
+    double ComputeCurrentLumenVolume(AbstractCellPopulation<DIM>& rCellPopulation)
+    {
+        if constexpr (DIM == 2)
+        {
+            // Use shoelace formula for polygon area
+            // First, collect all cell positions and sort by angle
+            std::vector<std::pair<double, c_vector<double, 2>>> anglePos;
+            
+            for (typename AbstractCellPopulation<DIM>::Iterator cell_iter = rCellPopulation.Begin();
+                 cell_iter != rCellPopulation.End(); ++cell_iter)
+            {
+                c_vector<double, 2> pos = rCellPopulation.GetLocationOfCellCentre(*cell_iter);
+                double angle = std::atan2(pos[1] - mLumenCenter[1], pos[0] - mLumenCenter[0]);
+                anglePos.push_back(std::make_pair(angle, pos));
+            }
+            
+            // Sort by angle
+            std::sort(anglePos.begin(), anglePos.end(),
+                [](const std::pair<double, c_vector<double, 2>>& a, 
+                   const std::pair<double, c_vector<double, 2>>& b) {
+                    return a.first < b.first;
+                });
+            
+            // Shoelace formula
+            double area = 0.0;
+            size_t n = anglePos.size();
+            for (size_t i = 0; i < n; i++)
+            {
+                size_t j = (i + 1) % n;
+                area += anglePos[i].second[0] * anglePos[j].second[1];
+                area -= anglePos[j].second[0] * anglePos[i].second[1];
+            }
+            return std::abs(area) / 2.0;
+        }
+        else // DIM == 3
+        {
+            // Estimate volume from mean radius: V = (4/3)πr³
+            double sum_r = 0.0;
+            unsigned count = 0;
+            for (typename AbstractCellPopulation<DIM>::Iterator cell_iter = rCellPopulation.Begin();
+                 cell_iter != rCellPopulation.End(); ++cell_iter)
+            {
+                c_vector<double, DIM> pos = rCellPopulation.GetLocationOfCellCentre(*cell_iter);
+                sum_r += norm_2(pos - mLumenCenter);
+                count++;
+            }
+            double mean_r = sum_r / count;
+            return (4.0 / 3.0) * M_PI * mean_r * mean_r * mean_r;
+        }
+    }
+
+    /**
+     * Hydrostatic pressure force: F_i = P × A_i × n̂_i
      *
-     * For each cell, compute the outward radial force from the lumen center.
-     * The force pushes cells outward toward the equilibrium shell radius:
-     *   F = pressure * (R_eq - r) * r_hat   for r < R_eq
-     *   F = 0                                for r >= R_eq
-     *
-     * where r is the cell's distance from lumen center, R_eq is the
-     * equilibrium radius, and r_hat is the outward unit radial vector.
-     *
-     * This creates a "pressure vessel" effect: cells inside the shell
-     * are pushed outward, maintaining lumen openness.
+     * n̂_i points radially outward from the lumen centroid.
+     * A_i depends on dimension and topology (see class docstring).
      */
     void AddForceContribution(AbstractCellPopulation<DIM>& rCellPopulation)
     {
-        // Optionally update lumen center from cell population centroid
+        ScopedTimer _prof("LumenPressure");
         if (mTrackCenter)
         {
             UpdateLumenCenter(rCellPopulation);
+        }
+
+        // Compute effective pressure
+        double effectivePressure = mPressure;
+        
+        if (mUseTargetVolume)
+        {
+            // Compute current lumen volume
+            double currentVolume = ComputeCurrentLumenVolume(rCellPopulation);
+            
+            // Initialize target volume on first call
+            if (!mInitialVolumeSet)
+            {
+                mInitialTargetVolume = currentVolume;
+                mInitialVolumeSet = true;
+            }
+            
+            // Target volume grows over time: V₀(t) = V_initial × (1 + growth_rate × t)
+            double currentTime = SimulationTime::Instance()->GetTime();
+            double targetVolume = mInitialTargetVolume * (1.0 + mVolumeGrowthRate * currentTime);
+            
+            // Pressure = bulk_modulus × (V_target - V_current) / V_target
+            // Positive when compressed (V_current < V_target), pushing outward
+            double volumeDeficit = (targetVolume - currentVolume) / targetVolume;
+            effectivePressure = mBulkModulus * volumeDeficit;
+            
+            // Clamp to prevent negative pressure (lumen pulling inward)
+            if (effectivePressure < 0.0)
+            {
+                effectivePressure = 0.0;
+            }
         }
 
         // Detect vertex-based population (for force distribution)
         VertexBasedCellPopulation<DIM>* p_vertex_pop =
             dynamic_cast<VertexBasedCellPopulation<DIM>*>(&rCellPopulation);
 
-        for (typename AbstractCellPopulation<DIM>::Iterator cell_iter = rCellPopulation.Begin();
-             cell_iter != rCellPopulation.End();
-             ++cell_iter)
+        // Build index→position map for neighbor lookups in 2D ring mode
+        std::map<unsigned, c_vector<double, DIM>> indexToPos;
+        if (DIM == 2 && mpRingTracker != nullptr)
         {
-            // Use cell centre (works for both node-based and vertex-based)
-            c_vector<double, DIM> location = rCellPopulation.GetLocationOfCellCentre(*cell_iter);
-            c_vector<double, DIM> displacement = location - mLumenCenter;
-            double distance = norm_2(displacement);
-
-            // Avoid division by zero for cells at the exact center
-            if (distance < 1e-6)
+            for (typename AbstractCellPopulation<DIM>::Iterator cell_iter = rCellPopulation.Begin();
+                 cell_iter != rCellPopulation.End(); ++cell_iter)
             {
-                // Apply a small random outward nudge to break symmetry
-                c_vector<double, DIM> nudge;
-                for (unsigned d = 0; d < DIM; d++)
-                {
-                    nudge[d] = (static_cast<double>(rand()) / RAND_MAX - 0.5) * 0.01;
-                }
-                unsigned loc_index = rCellPopulation.GetLocationIndexUsingCell(*cell_iter);
-                if (p_vertex_pop)
-                {
-                    VertexElement<DIM, DIM>* p_element = p_vertex_pop->rGetMesh().GetElement(loc_index);
-                    unsigned n_nodes = p_element->GetNumNodes();
-                    c_vector<double, DIM> nudge_per_node = nudge / static_cast<double>(n_nodes);
-                    for (unsigned i = 0; i < n_nodes; i++)
-                    {
-                        p_element->GetNode(i)->AddAppliedForceContribution(nudge_per_node);
-                    }
-                }
-                else
-                {
-                    rCellPopulation.GetNode(loc_index)->AddAppliedForceContribution(nudge);
-                }
+                unsigned idx = rCellPopulation.GetLocationIndexUsingCell(*cell_iter);
+                indexToPos[idx] = rCellPopulation.GetLocationOfCellCentre(*cell_iter);
+            }
+        }
+
+        // Count cells for 3D equal-partition area estimate
+        unsigned numCells = rCellPopulation.GetNumRealCells();
+
+        for (typename AbstractCellPopulation<DIM>::Iterator cell_iter = rCellPopulation.Begin();
+             cell_iter != rCellPopulation.End(); ++cell_iter)
+        {
+            unsigned loc_index = rCellPopulation.GetLocationIndexUsingCell(*cell_iter);
+            c_vector<double, DIM> pos = rCellPopulation.GetLocationOfCellCentre(*cell_iter);
+            c_vector<double, DIM> disp = pos - mLumenCenter;
+            double r = norm_2(disp);
+
+            // Skip cells at the exact center (would give zero normal)
+            if (r < 1e-6)
+            {
                 continue;
             }
 
-            c_vector<double, DIM> unit_radial = displacement / distance;
+            c_vector<double, DIM> n_hat = disp / r;  // outward radial unit normal
 
-            // Apply outward pressure only to cells inside the equilibrium shell
-            if (distance < mLumenEquilibriumRadius)
+            // Compute effective apical surface area element A_i
+            double area_element = 0.0;
+
+            if (DIM == 2 && mpRingTracker != nullptr)
             {
-                double deficit = mLumenEquilibriumRadius - distance;
-                c_vector<double, DIM> force = mPressureStrength * deficit * unit_radial;
-
-                // Apply force: distribute across element vertices for vertex pops
-                unsigned loc_index = rCellPopulation.GetLocationIndexUsingCell(*cell_iter);
-                if (p_vertex_pop)
+                // 2D ring: arc length = ½(|x_L - x_i| + |x_R - x_i|)
+                auto [leftIdx, rightIdx] = mpRingTracker->GetNeighbors(loc_index);
+                if (indexToPos.count(leftIdx) && indexToPos.count(rightIdx))
                 {
-                    VertexElement<DIM, DIM>* p_element = p_vertex_pop->rGetMesh().GetElement(loc_index);
-                    unsigned n_nodes = p_element->GetNumNodes();
-                    c_vector<double, DIM> force_per_node = force / static_cast<double>(n_nodes);
-                    for (unsigned i = 0; i < n_nodes; i++)
-                    {
-                        p_element->GetNode(i)->AddAppliedForceContribution(force_per_node);
-                    }
+                    double dL = norm_2(indexToPos[leftIdx] - pos);
+                    double dR = norm_2(indexToPos[rightIdx] - pos);
+                    area_element = 0.5 * (dL + dR);
                 }
                 else
                 {
-                    rCellPopulation.GetNode(loc_index)->AddAppliedForceContribution(force);
+                    // Fallback: equal partition of circumference
+                    area_element = 2.0 * M_PI * r / numCells;
                 }
+            }
+            else if (DIM == 2)
+            {
+                // 2D without ring tracker: equal partition of circumference
+                area_element = 2.0 * M_PI * r / numCells;
+            }
+            else // DIM == 3
+            {
+                // 3D: equal Voronoi partition of sphere surface
+                area_element = 4.0 * M_PI * r * r / numCells;
+            }
+
+            // F_i = P × A_i × n̂_i
+            c_vector<double, DIM> force = effectivePressure * area_element * n_hat;
+
+            // Apply force
+            if (p_vertex_pop)
+            {
+                VertexElement<DIM, DIM>* p_element = p_vertex_pop->rGetMesh().GetElement(loc_index);
+                unsigned n_nodes = p_element->GetNumNodes();
+                c_vector<double, DIM> force_per_node = force / static_cast<double>(n_nodes);
+                for (unsigned i = 0; i < n_nodes; i++)
+                {
+                    p_element->GetNode(i)->AddAppliedForceContribution(force_per_node);
+                }
+            }
+            else
+            {
+                rCellPopulation.GetNode(loc_index)->AddAppliedForceContribution(force);
             }
         }
     }
 
-    /**
-     * Update lumen center from population centroid.
-     */
     void UpdateLumenCenter(AbstractCellPopulation<DIM>& rCellPopulation)
     {
         c_vector<double, DIM> center = zero_vector<double>(DIM);
         unsigned count = 0;
 
         for (typename AbstractCellPopulation<DIM>::Iterator cell_iter = rCellPopulation.Begin();
-             cell_iter != rCellPopulation.End();
-             ++cell_iter)
+             cell_iter != rCellPopulation.End(); ++cell_iter)
         {
             center += rCellPopulation.GetLocationOfCellCentre(*cell_iter);
             count++;
@@ -224,39 +348,66 @@ public:
 
     // ---- Setters/Getters ----
 
-    void SetPressureStrength(double strength)
+    void SetPressure(double pressure)
     {
-        assert(strength >= 0.0);
-        mPressureStrength = strength;
+        mPressure = pressure;
     }
 
-    double GetPressureStrength() const { return mPressureStrength; }
-
-    void SetLumenEquilibriumRadius(double radius)
-    {
-        assert(radius > 0.0);
-        mLumenEquilibriumRadius = radius;
-    }
-
-    double GetLumenEquilibriumRadius() const { return mLumenEquilibriumRadius; }
+    double GetPressure() const { return mPressure; }
 
     void SetLumenCenter(c_vector<double, DIM> center)
     {
         mLumenCenter = center;
-        mTrackCenter = false;  // Manual center disables auto-tracking
+        mTrackCenter = false;
     }
 
     c_vector<double, DIM> GetLumenCenter() const { return mLumenCenter; }
 
     void SetTrackCenter(bool track) { mTrackCenter = track; }
-
     bool GetTrackCenter() const { return mTrackCenter; }
+
+    void SetRingTopologyTracker(const RingTopologyTracker<DIM>* pTracker)
+    {
+        mpRingTracker = pTracker;
+    }
+
+    // ---- Target Volume Mode (incompressible fluid) ----
+    
+    /** Enable target volume mode with growing lumen */
+    void SetUseTargetVolume(bool use) { mUseTargetVolume = use; }
+    bool GetUseTargetVolume() const { return mUseTargetVolume; }
+    
+    /** Set initial target volume (if not set, auto-detected from first timestep) */
+    void SetInitialTargetVolume(double v) 
+    { 
+        mInitialTargetVolume = v; 
+        mInitialVolumeSet = true;
+    }
+    double GetInitialTargetVolume() const { return mInitialTargetVolume; }
+    
+    /** Volume growth rate (fraction per hour, e.g. 0.1 = 10% per hour) */
+    void SetVolumeGrowthRate(double rate) { mVolumeGrowthRate = rate; }
+    double GetVolumeGrowthRate() const { return mVolumeGrowthRate; }
+    
+    /** Bulk modulus - stiffness of the incompressible fluid */
+    void SetBulkModulus(double k) { mBulkModulus = k; }
+    double GetBulkModulus() const { return mBulkModulus; }
+    
+    /** Update current simulation time (call from simulation modifier) */
+    void SetCurrentTime(double t) { mCurrentTime = t; }
+    double GetCurrentTime() const { return mCurrentTime; }
+
+    // Keep old setters as no-ops for backward compatibility during transition
+    void SetPressureStrength(double s) { mPressure = s; }
+    void SetLumenEquilibriumRadius(double /*r*/) { /* no-op: no longer used */ }
 
     void OutputForceParameters(out_stream& rParamsFile)
     {
-        *rParamsFile << "\t\t\t<PressureStrength>" << mPressureStrength << "</PressureStrength>\n";
-        *rParamsFile << "\t\t\t<LumenEquilibriumRadius>" << mLumenEquilibriumRadius << "</LumenEquilibriumRadius>\n";
+        *rParamsFile << "\t\t\t<Pressure>" << mPressure << "</Pressure>\n";
         *rParamsFile << "\t\t\t<TrackCenter>" << mTrackCenter << "</TrackCenter>\n";
+        *rParamsFile << "\t\t\t<UseTargetVolume>" << mUseTargetVolume << "</UseTargetVolume>\n";
+        *rParamsFile << "\t\t\t<VolumeGrowthRate>" << mVolumeGrowthRate << "</VolumeGrowthRate>\n";
+        *rParamsFile << "\t\t\t<BulkModulus>" << mBulkModulus << "</BulkModulus>\n";
         AbstractForce<DIM>::OutputForceParameters(rParamsFile);
     }
 };

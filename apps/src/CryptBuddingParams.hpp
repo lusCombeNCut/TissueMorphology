@@ -42,6 +42,8 @@ struct CryptBuddingParams
     bool enableSloughing;
     bool enableDifferentialAdhesion;
     bool enableCellPolarity;
+    bool enableEcmConfinement;
+    bool enableContinuousPvd;
 
     double dt;
     double dtGrow;     // Phase 2 growth dt for vertex3d (separate from relaxation dt)
@@ -69,12 +71,14 @@ struct CryptBuddingParams
     double bmRadius3d;
     double bmOffset3dVertex;
     double ecmDegradationRate;
+    double ecmDiffusionCoeff;
     double ecmMaxRadius2d;
     double ecmMaxRadius3d;
 
     double lumenPressure;
-    double lumenEqRadius2d;
-    double lumenEqRadius3d;
+    bool   lumenUseTargetVolume;      // Use incompressible fluid model
+    double lumenVolumeGrowthRate;     // Volume growth rate (fraction per hour)
+    double lumenBulkModulus;          // Fluid stiffness (pressure per fractional compression)
 
     double apicalConstrictionStrength;
 
@@ -87,6 +91,19 @@ struct CryptBuddingParams
     double nhMembraneSurface;
     double nhCellCellAdhesion;
     double nhBoundaryAdhesion;
+
+    // Per-cell-type Nagai-Honda adhesion (symmetric 3×3 matrix)
+    // Types: 0=stem, 1=transit, 2=differentiated
+    double nhStemStemAdhesion;
+    double nhStemTransitAdhesion;
+    double nhStemDiffAdhesion;
+    double nhTransitTransitAdhesion;
+    double nhTransitDiffAdhesion;
+    double nhDiffDiffAdhesion;
+    // Per-type boundary adhesion
+    double nhStemBoundaryAdhesion;
+    double nhTransitBoundaryAdhesion;
+    double nhDiffBoundaryAdhesion;
 
     double gammaApical;
     double gammaBasal;
@@ -104,6 +121,7 @@ struct CryptBuddingParams
     double ecmDomainHalf;
     double ecmGridSpacing;
     double ecmBaseSpeed;
+    std::string ecmGridType;     // "square" or "hex"
 
     double t1Threshold2d;
     double t2Threshold2d;
@@ -114,14 +132,34 @@ struct CryptBuddingParams
     double lumenExclusionStrength;
     double minRadiusFraction;  // cells cannot go below this fraction of target radius
 
+    // Spring neighbor strategy for node-based models
+    // true  = topology-based (RingSpringForce / SurfaceSpringForce)
+    // false = distance-threshold (GeneralisedLinearSpringForce)
+    bool useTopologyBasedSprings;
+
     // Cell type proportions for uniform random distribution
     double stemFraction;
     double transitFraction;
     // remainder (1 - stemFraction - transitFraction) = differentiated/Paneth
 
+    // Cell cycle duration parameters
+    double stemCycleMin;        // Minimum total cycle for stem cells (hours)
+    double stemCycleMax;        // Maximum total cycle for stem cells (hours)
+    double taCycleRatio;        // TA cycle = ratio × stem cycle (0.5 or 1.0)
+    // Paneth / differentiated cells never divide (handled by DifferentiatedCellProliferativeType)
+
+    // Generational cascade (Meineke et al. 2001)
+    bool enableGenerationalCascade;     // If true: Stem → TA → Differentiated cascade
+    unsigned maxTransitGenerations;     // TA cells differentiate after this many divisions
+
     // Cell polarity parameters (monolayer enforcement via ya||a-style polarity)
     double polarityBendingStrength;     // Epithelial bending force strength
     double polarityAlignmentStrength;   // Tissue polarity alignment strength
+
+    // Relative radius fractions — force radii derived as organoidRadius × fraction
+    // These are the primary config knobs; absolute radii are auto-computed in Finalise()
+    double bmRadiusFraction;            // BM target radius as fraction of organoidRadius
+    double ecmMaxRadiusFraction;        // ECM degradation boundary as fraction of organoidRadius
 
     // Whether endTime/dt were explicitly set by user
     bool endTimeOverridden;
@@ -138,6 +176,8 @@ struct CryptBuddingParams
         enableRelaxation = true;
         enableSloughing = true;
         enableDifferentialAdhesion = true;
+        enableEcmConfinement = true;
+        enableContinuousPvd = false;
         endTimeOverridden = false;
         dtOverridden = false;
         endTime = 168.0;
@@ -161,9 +201,10 @@ struct CryptBuddingParams
         sphereRadius3dVertex = 10.0;  // derived from organoidRadius3d in Finalise()
         bmOffset3dVertex     = 1.0;
 
-        lumenPressure   = 2.0;
-        lumenEqRadius2d = 0.0;     // derived in Finalise()
-        lumenEqRadius3d = 0.0;     // derived in Finalise()
+        lumenPressure          = 2.0;
+        lumenUseTargetVolume   = false;   // Default to constant pressure mode
+        lumenVolumeGrowthRate  = 0.05;    // 5% per hour
+        lumenBulkModulus       = 10.0;    // Fluid stiffness
 
         apicalConstrictionStrength = 3.0;
 
@@ -177,6 +218,17 @@ struct CryptBuddingParams
         nhCellCellAdhesion = 1.0;
         nhBoundaryAdhesion = 2.0;
 
+        // Per-type adhesion defaults (all equal = uniform)
+        nhStemStemAdhesion       = 1.0;
+        nhStemTransitAdhesion    = 1.0;
+        nhStemDiffAdhesion       = 1.0;
+        nhTransitTransitAdhesion = 1.0;
+        nhTransitDiffAdhesion    = 1.0;
+        nhDiffDiffAdhesion       = 1.0;
+        nhStemBoundaryAdhesion    = 2.0;
+        nhTransitBoundaryAdhesion = 2.0;
+        nhDiffBoundaryAdhesion    = 2.0;
+
         gammaApical  = 0.85;
         gammaBasal   = 0.85;
         gammaLateral = 0.7;
@@ -189,9 +241,10 @@ struct CryptBuddingParams
         quiescentFraction  = 0.7;
         sloughRadiusFactor = 5.0;
 
-        ecmDomainHalf  = 80.0;
+        ecmDomainHalf  = -1.0;  // sentinel: auto-derive in Finalise()
         ecmGridSpacing = 10.0;
         ecmBaseSpeed   = 0.3;
+        ecmGridType    = "square";   // "square" or "hex"
 
         // Curvature bending force (Drasdo 2000 - monolayer enforcement)
         enableCurvatureBending    = true;   // Enable by default for node2d
@@ -199,32 +252,107 @@ struct CryptBuddingParams
         lumenExclusionStrength    = 500.0;   // Strong repulsion from lumen interior
         minRadiusFraction         = 0.7;    // Cells stay outside 70% of target radius
 
+        // Spring neighbor strategy (node-based models)
+        useTopologyBasedSprings   = true;   // true = topology (ring/surface), false = distance threshold
+
         // Cell type proportions for uniform random distribution
         stemFraction    = 0.2;
         transitFraction = 0.5;
+
+        // Cell cycle duration (uniform random total cycle)
+        stemCycleMin  = 12.0;   // U(12, 14) h total cycle for stem cells
+        stemCycleMax  = 14.0;
+        taCycleRatio  = 1.0;    // TA cycle = ratio × stem cycle (set 0.5 for half)
+
+        // Generational cascade (Meineke et al. 2001)
+        enableGenerationalCascade = true;   // Enable Stem → TA → Differentiated cascade
+        maxTransitGenerations = 3;          // TA cells differentiate after 3 divisions
 
         // Cell polarity (ya||a-style monolayer enforcement)
         enableCellPolarity          = true;   // Enable by default for node models
         polarityBendingStrength     = 0.3;    // Epithelial bending force
         polarityAlignmentStrength   = 0.1;    // Tissue polarity alignment
+
+        // Relative radius fractions (absolute radii derived in Finalise)
+        bmRadiusFraction       = 1.25;   // BM just outside cell ring
+        ecmMaxRadiusFraction   = 4.0;    // ECM boundary far from organoid
     }
 
     void Finalise()
     {
         randomSeed = static_cast<unsigned>(ecmStiffness * 10000) + runNumber * 137;
 
+        // Derive organoidRadius2d from numCells so spacing = rest length (1.0)
+        // spacing = 2πR / N = 1.0  →  R = N / (2π)
+        organoidRadius2d = numCells2dNode / (2.0 * M_PI);
+
+        // Derive vertex-2D annulus radii so each wedge cell has area ≈ 1.0
+        // Mid-radius matches node spacing: R_mid = N / (2π)
+        // Ring width w = 2πR_mid / N = 1.0 (square aspect ratio)
+        {
+            double R_mid = numCells2dVertex / (2.0 * M_PI);
+            double w = 2.0 * M_PI * R_mid / numCells2dVertex;  // = 1.0
+            innerRadius2d = R_mid - 0.5 * w;
+            outerRadius2d = R_mid + 0.5 * w;
+        }
+
+        // Derive organoidRadius3d from numCells so Voronoi cell area ≈ 1.0²
+        // 4πR² / N = 1.0  →  R = √(N / 4π)
+        organoidRadius3d = std::sqrt(numCells3dNode / (4.0 * M_PI));
+
         bmStiffnessNode   = ecmStiffness;
         bmStiffnessVertex = ecmStiffness * 0.5;
-        bmRadius2d         = organoidRadius2d + 2.0;
-        bmRadius3d         = organoidRadius3d + 2.0;
         ecmDegradationRate = 0.02;
-        ecmMaxRadius2d     = organoidRadius2d * 4.0;
-        ecmMaxRadius3d     = organoidRadius3d * 4.0;
+        ecmDiffusionCoeff  = 0.1;    // ECM density smoothing coefficient
 
-        // Standardised derived radii — single source of truth from organoidRadius
+        // Derive all absolute radii from organoidRadius × fraction
+        bmRadius2d         = organoidRadius2d * bmRadiusFraction;
+        bmRadius3d         = organoidRadius3d * bmRadiusFraction;
+        ecmMaxRadius2d     = organoidRadius2d * ecmMaxRadiusFraction;
+        ecmMaxRadius3d     = organoidRadius3d * ecmMaxRadiusFraction;
         sphereRadius3dVertex = organoidRadius3d;
-        lumenEqRadius2d      = organoidRadius2d + 1.0;
-        lumenEqRadius3d      = organoidRadius3d + 1.0;
+
+        // Auto-derive ECM domain from organoid size if not explicitly set
+        if (ecmDomainHalf < 0.0)
+        {
+            double maxR = std::max(ecmMaxRadius2d, ecmMaxRadius3d);
+            ecmDomainHalf = std::max(maxR, organoidRadius3d * 3.0) * 1.5;
+            std::cout << "  ECM domain auto-derived: ecmDomainHalf = " << ecmDomainHalf
+                      << " (organoidR=" << organoidRadius3d
+                      << ", ecmMaxR=" << ecmMaxRadius3d << ")" << std::endl;
+        }
+
+        if (modelType == "node2d")
+        {
+            std::cout << "Node2D: " << numCells2dNode << " cells, R="
+                      << organoidRadius2d << " (spacing="
+                      << 2.0 * M_PI * organoidRadius2d / numCells2dNode << ")"
+                      << "  BM=" << bmRadius2d << "  ECMmax=" << ecmMaxRadius2d << std::endl;
+        }
+        else if (modelType == "vertex2d")
+        {
+            std::cout << "Vertex2D: " << numCells2dVertex << " cells, Rin="
+                      << innerRadius2d << " Rout=" << outerRadius2d
+                      << " (area/cell="
+                      << 0.5 * (2.0 * M_PI / numCells2dVertex)
+                         * (outerRadius2d * outerRadius2d - innerRadius2d * innerRadius2d)
+                      << ")"
+                      << "  BM=" << bmRadius2d << "  ECMmax=" << ecmMaxRadius2d << std::endl;
+        }
+        else if (modelType == "node3d")
+        {
+            std::cout << "Node3D: " << numCells3dNode << " cells, R="
+                      << organoidRadius3d << " (area/cell="
+                      << 4.0 * M_PI * organoidRadius3d * organoidRadius3d / numCells3dNode
+                      << ")"
+                      << "  BM=" << bmRadius3d << "  ECMmax=" << ecmMaxRadius3d << std::endl;
+        }
+        else if (modelType == "vertex3d")
+        {
+            std::cout << "Vertex3D: " << numCells3dVertex << " cells, R="
+                      << organoidRadius3d << " sphere=" << sphereRadius3dVertex
+                      << "  BM=" << bmRadius3d << "  ECMmax=" << ecmMaxRadius3d << std::endl;
+        }
 
         t1Threshold2d = (ecmStiffness < 2.0) ? 0.2 : 0.15;
         t2Threshold2d = 0.05;
@@ -362,6 +490,9 @@ struct CryptBuddingParams
         getBool("enableDifferentialAdhesion", enableDifferentialAdhesion);
         getBool("enableCurvatureBending", enableCurvatureBending);
         getBool("enableCellPolarity", enableCellPolarity);
+        getBool("enableEcmConfinement", enableEcmConfinement);
+        getBool("useTopologyBasedSprings", useTopologyBasedSprings);
+        getBool("enableContinuousPvd", enableContinuousPvd);
 
         if (configMap.count("dt")) { getDouble("dt", dt); dtOverridden = true; }
         if (configMap.count("endTime")) { getDouble("endTime", endTime); endTimeOverridden = true; }
@@ -385,15 +516,17 @@ struct CryptBuddingParams
 
         getDouble("bmStiffnessNode", bmStiffnessNode);
         getDouble("bmStiffnessVertex", bmStiffnessVertex);
-        getDouble("bmRadius2d", bmRadius2d);
-        getDouble("bmRadius3d", bmRadius3d);
         getDouble("ecmDegradationRate", ecmDegradationRate);
-        getDouble("ecmMaxRadius2d", ecmMaxRadius2d);
-        getDouble("ecmMaxRadius3d", ecmMaxRadius3d);
+        getDouble("ecmDiffusionCoeff", ecmDiffusionCoeff);
+
+        // Radius fractions (absolute radii derived in Finalise)
+        getDouble("bmRadiusFraction", bmRadiusFraction);
+        getDouble("ecmMaxRadiusFraction", ecmMaxRadiusFraction);
 
         getDouble("lumenPressure", lumenPressure);
-        getDouble("lumenEqRadius2d", lumenEqRadius2d);
-        getDouble("lumenEqRadius3d", lumenEqRadius3d);
+        getBool("lumenUseTargetVolume", lumenUseTargetVolume);
+        getDouble("lumenVolumeGrowthRate", lumenVolumeGrowthRate);
+        getDouble("lumenBulkModulus", lumenBulkModulus);
 
         getDouble("apicalConstrictionStrength", apicalConstrictionStrength);
 
@@ -406,6 +539,17 @@ struct CryptBuddingParams
         getDouble("nhMembraneSurface", nhMembraneSurface);
         getDouble("nhCellCellAdhesion", nhCellCellAdhesion);
         getDouble("nhBoundaryAdhesion", nhBoundaryAdhesion);
+
+        // Per-type adhesion (override defaults if present)
+        getDouble("nhStemStemAdhesion", nhStemStemAdhesion);
+        getDouble("nhStemTransitAdhesion", nhStemTransitAdhesion);
+        getDouble("nhStemDiffAdhesion", nhStemDiffAdhesion);
+        getDouble("nhTransitTransitAdhesion", nhTransitTransitAdhesion);
+        getDouble("nhTransitDiffAdhesion", nhTransitDiffAdhesion);
+        getDouble("nhDiffDiffAdhesion", nhDiffDiffAdhesion);
+        getDouble("nhStemBoundaryAdhesion", nhStemBoundaryAdhesion);
+        getDouble("nhTransitBoundaryAdhesion", nhTransitBoundaryAdhesion);
+        getDouble("nhDiffBoundaryAdhesion", nhDiffBoundaryAdhesion);
 
         getDouble("gammaApical", gammaApical);
         getDouble("gammaBasal", gammaBasal);
@@ -420,6 +564,7 @@ struct CryptBuddingParams
         getDouble("ecmDomainHalf", ecmDomainHalf);
         getDouble("ecmGridSpacing", ecmGridSpacing);
         getDouble("ecmBaseSpeed", ecmBaseSpeed);
+        getString("ecmGridType", ecmGridType);
 
         getDouble("t1Threshold2d", t1Threshold2d);
         getDouble("t2Threshold2d", t2Threshold2d);
@@ -430,6 +575,13 @@ struct CryptBuddingParams
 
         getDouble("stemFraction", stemFraction);
         getDouble("transitFraction", transitFraction);
+
+        getDouble("stemCycleMin", stemCycleMin);
+        getDouble("stemCycleMax", stemCycleMax);
+        getDouble("taCycleRatio", taCycleRatio);
+
+        getBool("enableGenerationalCascade", enableGenerationalCascade);
+        getUnsigned("maxTransitGenerations", maxTransitGenerations);
 
         getDouble("polarityBendingStrength", polarityBendingStrength);
         getDouble("polarityAlignmentStrength", polarityAlignmentStrength);
@@ -471,18 +623,22 @@ struct CryptBuddingParams
         file << "enableSloughing = " << (enableSloughing ? "true" : "false") << "\n";
         file << "enableDifferentialAdhesion = " << (enableDifferentialAdhesion ? "true" : "false") << "\n";
         file << "enableCurvatureBending = " << (enableCurvatureBending ? "true" : "false") << "\n";
-        file << "enableCellPolarity = " << (enableCellPolarity ? "true" : "false") << "\n\n";
+        file << "enableCellPolarity = " << (enableCellPolarity ? "true" : "false") << "\n";
+        file << "useTopologyBasedSprings = " << (useTopologyBasedSprings ? "true" : "false") << "  # true=topology (ring/surface), false=distance threshold\n";
+        file << "enableContinuousPvd = " << (enableContinuousPvd ? "true" : "false") << "  # Keep .pvd files valid during simulation\n\n";
 
         file << "[ECM]\n";
         file << "ecmStiffness = " << ecmStiffness << "       # Main ECM/BM stiffness parameter\n";
         file << "bmStiffnessNode = " << bmStiffnessNode << "\n";
         file << "bmStiffnessVertex = " << bmStiffnessVertex << "\n";
-        file << "bmRadius2d = " << bmRadius2d << "\n";
-        file << "bmRadius3d = " << bmRadius3d << "\n";
         file << "bmOffset3dVertex = " << bmOffset3dVertex << "\n";
         file << "ecmDegradationRate = " << ecmDegradationRate << "\n";
-        file << "ecmMaxRadius2d = " << ecmMaxRadius2d << "\n";
-        file << "ecmMaxRadius3d = " << ecmMaxRadius3d << "\n\n";
+        file << "ecmDiffusionCoeff = " << ecmDiffusionCoeff << "  # Density smoothing coefficient\n\n";
+
+        file << "# Radius fractions — absolute radii = organoidRadius × fraction\n";
+        file << "bmRadiusFraction = " << bmRadiusFraction << "     # BM target radius (derived: 2D=" << bmRadius2d << " 3D=" << bmRadius3d << ")\n";
+
+        file << "ecmMaxRadiusFraction = " << ecmMaxRadiusFraction << "  # ECM boundary (derived: 2D=" << ecmMaxRadius2d << " 3D=" << ecmMaxRadius3d << ")\n\n";
 
         file << "[Geometry2D]\n";
         file << "organoidRadius2d = " << organoidRadius2d << "\n";
@@ -512,8 +668,9 @@ struct CryptBuddingParams
 
         file << "# Lumen pressure\n";
         file << "lumenPressure = " << lumenPressure << "\n";
-        file << "lumenEqRadius2d = " << lumenEqRadius2d << "\n";
-        file << "lumenEqRadius3d = " << lumenEqRadius3d << "\n\n";
+        file << "lumenUseTargetVolume = " << (lumenUseTargetVolume ? "true" : "false") << "   # Incompressible fluid model\n";
+        file << "lumenVolumeGrowthRate = " << lumenVolumeGrowthRate << "   # fraction per hour\n";
+        file << "lumenBulkModulus = " << lumenBulkModulus << "   # fluid stiffness\n\n";
 
         file << "# Apical constriction\n";
         file << "apicalConstrictionStrength = " << apicalConstrictionStrength << "\n\n";
@@ -530,8 +687,18 @@ struct CryptBuddingParams
         file << "[VertexModel]\n";
         file << "# Nagai-Honda parameters\n";
         file << "nhMembraneSurface = " << nhMembraneSurface << "\n";
-        file << "nhCellCellAdhesion = " << nhCellCellAdhesion << "\n";
-        file << "nhBoundaryAdhesion = " << nhBoundaryAdhesion << "\n\n";
+        file << "nhCellCellAdhesion = " << nhCellCellAdhesion << "   # Uniform fallback\n";
+        file << "nhBoundaryAdhesion = " << nhBoundaryAdhesion << "   # Uniform fallback\n";
+        file << "# Per-type adhesion (symmetric)\n";
+        file << "nhStemStemAdhesion = " << nhStemStemAdhesion << "\n";
+        file << "nhStemTransitAdhesion = " << nhStemTransitAdhesion << "\n";
+        file << "nhStemDiffAdhesion = " << nhStemDiffAdhesion << "\n";
+        file << "nhTransitTransitAdhesion = " << nhTransitTransitAdhesion << "\n";
+        file << "nhTransitDiffAdhesion = " << nhTransitDiffAdhesion << "\n";
+        file << "nhDiffDiffAdhesion = " << nhDiffDiffAdhesion << "\n";
+        file << "nhStemBoundaryAdhesion = " << nhStemBoundaryAdhesion << "\n";
+        file << "nhTransitBoundaryAdhesion = " << nhTransitBoundaryAdhesion << "\n";
+        file << "nhDiffBoundaryAdhesion = " << nhDiffBoundaryAdhesion << "\n\n";
 
         file << "# Surface tension\n";
         file << "gammaApical = " << gammaApical << "\n";
@@ -548,12 +715,18 @@ struct CryptBuddingParams
 
         file << "[CellCycle]\n";
         file << "quiescentFraction = " << quiescentFraction << "  # Contact inhibition threshold\n";
-        file << "sloughRadiusFactor = " << sloughRadiusFactor << " # Sloughing boundary = radius * factor\n\n";
+        file << "sloughRadiusFactor = " << sloughRadiusFactor << " # Sloughing boundary = radius * factor\n";
+        file << "stemCycleMin = " << stemCycleMin << "        # Stem total cycle min (hours)\n";
+        file << "stemCycleMax = " << stemCycleMax << "        # Stem total cycle max (hours)\n";
+        file << "taCycleRatio = " << taCycleRatio << "        # TA cycle = ratio * stem (0.5 or 1)\n";
+        file << "enableGenerationalCascade = " << (enableGenerationalCascade ? "true" : "false") << "  # Stem→TA→Diff cascade (Meineke 2001)\n";
+        file << "maxTransitGenerations = " << maxTransitGenerations << "       # TA divisions before differentiation\n\n";
 
         file << "[ECMGuidance]\n";
         file << "ecmDomainHalf = " << ecmDomainHalf << "\n";
         file << "ecmGridSpacing = " << ecmGridSpacing << "\n";
         file << "ecmBaseSpeed = " << ecmBaseSpeed << "\n";
+        file << "ecmGridType = " << ecmGridType << "\n";
 
         file.close();
         std::cout << "Saved parameters to: " << filePath << std::endl;

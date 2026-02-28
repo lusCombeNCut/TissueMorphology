@@ -17,6 +17,7 @@ This file is part of Chaste.
 #include "AbstractCellPopulation.hpp"
 #include "NodeBasedCellPopulation.hpp"
 #include "SimulationTime.hpp"
+#include "SimProfiler.hpp"
 
 /**
  * A force class implementing cell polarity for maintaining epithelial monolayers.
@@ -230,6 +231,7 @@ public:
      */
     void AddForceContribution(AbstractCellPopulation<DIM>& rCellPopulation)
     {
+        ScopedTimer _prof("CellPolarity");
         // Ensure polarities are initialized
         InitializePolarities(rCellPopulation);
 

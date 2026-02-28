@@ -25,6 +25,7 @@
 
 #include "AbstractCellBasedSimulationModifier.hpp"
 #include "AbstractCellPopulation.hpp"
+#include "SimProfiler.hpp"
 
 #include <map>
 #include <vector>
@@ -236,6 +237,7 @@ public:
      */
     void UpdateAtEndOfTimeStep(AbstractCellPopulation<DIM, DIM>& rCellPopulation) override
     {
+        ScopedTimer _prof("RingTopology");
         // Initialize on first call
         if (!mInitialized)
         {

@@ -34,11 +34,12 @@ inline void AssignCellTypeByFraction(
     boost::shared_ptr<AbstractCellProliferativeType> pStemType,
     boost::shared_ptr<AbstractCellProliferativeType> pTransitType,
     boost::shared_ptr<AbstractCellProliferativeType> pDiffType,
-    double stemFraction = 0.2, double transitFraction = 0.5)
+    double stemFraction, double transitFraction)
 {
     // Uniformly random cell type assignment: each cell independently draws
     // from the target proportions, giving a spatially uniform distribution
     // across the organoid surface (rather than z-band segregation).
+    // NOTE: stemFraction and transitFraction must always be provided from config file
     double u = RandomNumberGenerator::Instance()->ranf();
     if (u < stemFraction)
     {
@@ -151,7 +152,11 @@ inline boost::shared_ptr<MutableVertexMesh<2,2>> MakeAnnularVertexMesh(
     pMesh->SetCellRearrangementRatio(1.5);
     pMesh->SetProtorosetteFormationProbability(0.0);
     pMesh->SetProtorosetteResolutionProbabilityPerTimestep(1.0);
-    pMesh->SetCheckForInternalIntersections(true);
+    // Note: SetCheckForInternalIntersections(true) causes PerformIntersectionSwap 
+    // assertion failures - disabled to avoid crashes
+    pMesh->SetCheckForInternalIntersections(false);
+    // Note: T3 swaps have unimplemented edge cases that cause NEVER_REACHED crashes
+    pMesh->SetCheckForT3Swaps(false);
     return pMesh;
 }
 
@@ -187,13 +192,27 @@ inline void PrintBanner(const CryptBuddingParams& p)
                   << " diff/Paneth=" << p.gammaDiffScale << std::endl;
     }
     std::cout << "  Features:" << std::endl;
-    std::cout << "    Lumen Pressure:        " << (p.enableLumenPressure ? "ON" : "OFF") << std::endl;
-    std::cout << "    Apical Constriction:    " << (p.enableApicalConstriction ? "ON" : "OFF") << std::endl;
-    std::cout << "    ECM Guidance (3D):      " << (p.enableEcmGuidance ? "ON" : "OFF") << std::endl;
-    std::cout << "    Sloughing:              " << (p.enableSloughing ? "ON" : "OFF") << std::endl;
-    std::cout << "    Differential Adhesion:  " << (p.enableDifferentialAdhesion ? "ON" : "OFF") << std::endl;
-    std::cout << "    Curvature Bending:      " << (p.enableCurvatureBending ? "ON" : "OFF") << std::endl;
-    std::cout << "    Cell Polarity:          " << (p.enableCellPolarity ? "ON" : "OFF") << std::endl;
+    std::cout << "    Lumen Pressure:         " << (p.enableLumenPressure ? "ON" : "OFF") << std::endl;
+    std::cout << "    Apical Constriction:     " << (p.enableApicalConstriction ? "ON" : "OFF") << std::endl;
+    std::cout << "    ECM Confinement:         " << (p.enableEcmConfinement ? "ON" : "OFF") << std::endl;
+    if (p.modelType == "node3d" || p.modelType == "vertex3d")
+        std::cout << "    ECM Guidance (3D):       " << (p.enableEcmGuidance ? "ON" : "OFF") << std::endl;
+    if (p.modelType == "node2d" || p.modelType == "vertex2d")
+        std::cout << "    Sloughing:               " << (p.enableSloughing ? "ON" : "OFF") << std::endl;
+    if (p.enableDifferentialAdhesion)
+        std::cout << "    Differential Adhesion:   ON" << std::endl;
+    if (p.modelType == "node3d")
+    {
+        std::cout << "    Curvature Bending:       " << (p.enableCurvatureBending ? "ON" : "OFF") << std::endl;
+        std::cout << "    Cell Polarity:           " << (p.enableCellPolarity ? "ON" : "OFF") << std::endl;
+        std::cout << "    Topology-Based Springs:  " << (p.useTopologyBasedSprings ? "ON" : "OFF") << std::endl;
+    }
+    if (p.modelType == "node2d")
+        std::cout << "    Topology-Based Springs:  " << (p.useTopologyBasedSprings ? "ON" : "OFF") << std::endl;
+    if (p.enableEcmConfinement)
+        std::cout << "    ECM Grid Type:           " << p.ecmGridType << std::endl;
+    if (p.enableContinuousPvd)
+        std::cout << "    Continuous PVD:          ON" << std::endl;
     std::cout << "============================================\n" << std::endl;
 }
 
@@ -223,6 +242,11 @@ inline void PrintUsage()
               << "  -endtime <double>     override end time\n"
               << "  -dt <double>          override timestep (relaxation in vertex3d)\n"
               << "  -dtgrow <double>      growth phase timestep, vertex3d (default: 0.002)\n"
+              << "  -continuous-pvd       keep .pvd files valid during simulation\n"
+              << "\nVertex model parameters (Nagai-Honda):\n"
+              << "  -adhesion <double>    cell-cell adhesion strength (default: 1.0)\n"
+              << "  -membrane <double>    membrane surface tension (default: 10.0)\n"
+              << "  -pressure <double>    lumen pressure strength (default: 1.0)\n"
               << "  -help                 print this message\n"
               << "\nExample:\n"
               << "  ./CryptBuddingApp -model mesh2d -config params.ini\n"
@@ -337,6 +361,22 @@ inline CryptBuddingParams ParseArguments(int argc, char* argv[])
         else if (arg == "-dtgrow" && i + 1 < argc)
         {
             p.dtGrow = std::stod(argv[++i]);
+        }
+        else if (arg == "-continuous-pvd")
+        {
+            p.enableContinuousPvd = true;
+        }
+        else if (arg == "-adhesion" && i + 1 < argc)
+        {
+            p.nhCellCellAdhesion = std::stod(argv[++i]);
+        }
+        else if (arg == "-membrane" && i + 1 < argc)
+        {
+            p.nhMembraneSurface = std::stod(argv[++i]);
+        }
+        else if (arg == "-pressure" && i + 1 < argc)
+        {
+            p.lumenPressure = std::stod(argv[++i]);
         }
         else
         {

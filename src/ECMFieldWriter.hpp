@@ -10,6 +10,7 @@ All rights reserved.
 
 #include "AbstractCellBasedSimulationModifier.hpp"
 #include "DynamicECMField.hpp"
+#include "SimProfiler.hpp"
 #include "OutputFileHandler.hpp"
 #include "SimulationTime.hpp"
 #include <boost/shared_ptr.hpp>
@@ -69,27 +70,32 @@ public:
      */
     virtual void UpdateAtEndOfTimeStep(AbstractCellPopulation<DIM,DIM>& rCellPopulation)
     {
+        ScopedTimer _prof("ECMFieldWriter");
         // Check if we should output this timestep
         if (SimulationTime::Instance()->GetTimeStepsElapsed() % mSamplingTimestepMultiple == 0)
         {
             unsigned current_timestep = SimulationTime::Instance()->GetTimeStepsElapsed();
             double current_time = SimulationTime::Instance()->GetTime();
             
-            // Create VTI filename using timestep (to match VTU file naming convention)
-            std::stringstream vti_filename_stream;
-            vti_filename_stream << "ecm_grid_" << current_timestep << ".vti";
-            std::string vti_filename = vti_filename_stream.str();
+            // File extension depends on grid type (vti for square, vtu for hex)
+            std::string ext = mpECMField->GetOutputExtension();
             
-            std::string full_vti_path = mOutputDirectory + "/" + vti_filename;
+            // Create filename using timestep (to match VTU file naming convention)
+            std::stringstream fname_stream;
+            fname_stream << "ecm_grid_" << current_timestep << ext;
+            std::string ecm_filename = fname_stream.str();
             
-            // Write ECM field to VTI file (XML ImageData format)
-            mpECMField->WriteToVTI(full_vti_path, current_time);
+            std::string full_path = mOutputDirectory + "/" + ecm_filename;
             
-            // Add entry to PVD file
+            // Write ECM field (picks VTI or VTU based on grid type)
+            mpECMField->WriteOutput(full_path, current_time);
+            
+            // Add entry to PVD file (use timestep number, not real time,
+            // so playback synchronizes with results.pvd)
             if (mpPvdFile)
             {
-                *mpPvdFile << "    <DataSet timestep=\"" << current_time 
-                          << "\" group=\"\" part=\"0\" file=\"" << vti_filename << "\"/>\n";
+                *mpPvdFile << "    <DataSet timestep=\"" << current_timestep 
+                          << "\" group=\"\" part=\"0\" file=\"" << ecm_filename << "\"/>\n";
             }
             
             mOutputCounter++;
@@ -117,13 +123,14 @@ public:
         *mpPvdFile << "<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"LittleEndian\">\n";
         *mpPvdFile << "  <Collection>\n";
         
-        // Write initial ECM field (timestep 0) as VTI
-        std::string vti_filename = "ecm_grid_0.vti";
-        std::string full_vti_path = full_output_dir + vti_filename;
-        mpECMField->WriteToVTI(full_vti_path, 0.0);
+        // Write initial ECM field (timestep 0)
+        std::string ext = mpECMField->GetOutputExtension();
+        std::string ecm_filename = "ecm_grid_0" + ext;
+        std::string full_path = full_output_dir + ecm_filename;
+        mpECMField->WriteOutput(full_path, 0.0);
         
-        // Add initial timestep to PVD
-        *mpPvdFile << "    <DataSet timestep=\"0\" group=\"\" part=\"0\" file=\"" << vti_filename << "\"/>\n";
+        // Add initial timestep to PVD (timestep 0)
+        *mpPvdFile << "    <DataSet timestep=\"0\" group=\"\" part=\"0\" file=\"" << ecm_filename << "\"/>\n";
     }
     
     /**

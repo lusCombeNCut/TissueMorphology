@@ -60,20 +60,26 @@ private:
     /** PVD file stream for time-series index */
     out_stream mpPvdFile;
 
+    /** If true, write only a z-center slice instead of the full 3D volume */
+    bool mSliceOnly;
+
 public:
     /**
      * Constructor.
      * 
      * @param pECMField Pointer to the 3D ECM field to visualize
      * @param samplingTimestepMultiple Write every N timesteps
+     * @param sliceOnly If true, save only the center z-slice (2D) instead of the full 3D volume
      */
     ECMFieldWriter3d(boost::shared_ptr<DynamicECMField3d> pECMField,
-                     unsigned samplingTimestepMultiple = 12)
+                     unsigned samplingTimestepMultiple = 12,
+                     bool sliceOnly = true)
         : AbstractCellBasedSimulationModifier<3>(),
           mpECMField(pECMField),
           mOutputDirectory(""),
           mSamplingTimestepMultiple(samplingTimestepMultiple),
-          mOutputCounter(0)
+          mOutputCounter(0),
+          mSliceOnly(sliceOnly)
     {
     }
     
@@ -107,7 +113,14 @@ public:
             
             std::string full_vti_path = mOutputDirectory + "/" + vti_filename;
             
-            mpECMField->WriteToVTI(full_vti_path, current_time);
+            if (mSliceOnly)
+            {
+                mpECMField->WriteSliceToVTI(full_vti_path, current_time);
+            }
+            else
+            {
+                mpECMField->WriteToVTI(full_vti_path, current_time);
+            }
             
             if (mpPvdFile)
             {
@@ -137,7 +150,14 @@ public:
         
         // Write initial state
         std::string initial_vti = mOutputDirectory + "/ecm3d_0.vti";
-        mpECMField->WriteToVTI(initial_vti, 0.0);
+        if (mSliceOnly)
+        {
+            mpECMField->WriteSliceToVTI(initial_vti, 0.0);
+        }
+        else
+        {
+            mpECMField->WriteToVTI(initial_vti, 0.0);
+        }
         
         if (mpPvdFile)
         {
