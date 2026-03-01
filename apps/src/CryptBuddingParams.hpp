@@ -164,6 +164,8 @@ struct CryptBuddingParams
     // Whether endTime/dt were explicitly set by user
     bool endTimeOverridden;
     bool dtOverridden;
+    bool t1ThresholdOverridden;
+    bool t2ThresholdOverridden;
 
     void SetDefaults()
     {
@@ -180,6 +182,8 @@ struct CryptBuddingParams
         enableContinuousPvd = false;
         endTimeOverridden = false;
         dtOverridden = false;
+        t1ThresholdOverridden = false;
+        t2ThresholdOverridden = false;
         endTime = 168.0;
         dt = 0.005;
         dtGrow = 0.002;   // Phase 2 growth dt for vertex3d (reduced from 0.006 for stability)
@@ -200,6 +204,10 @@ struct CryptBuddingParams
         interactionCutoff3d  = 8.0;
         sphereRadius3dVertex = 10.0;  // derived from organoidRadius3d in Finalise()
         bmOffset3dVertex     = 1.0;
+
+        // ECM degradation parameters
+        ecmDegradationRate   = 0.02;   // Default ECM density loss per cell per unit time
+        ecmDiffusionCoeff    = 0.1;    // ECM density smoothing coefficient
 
         lumenPressure          = 2.0;
         lumenUseTargetVolume   = false;   // Default to constant pressure mode
@@ -302,8 +310,8 @@ struct CryptBuddingParams
 
         bmStiffnessNode   = ecmStiffness;
         bmStiffnessVertex = ecmStiffness * 0.5;
-        ecmDegradationRate = 0.02;
-        ecmDiffusionCoeff  = 0.1;    // ECM density smoothing coefficient
+        // Note: ecmDegradationRate and ecmDiffusionCoeff are loaded from config file
+        // Only set defaults if not already set (SetDefaults handles this)
 
         // Derive all absolute radii from organoidRadius × fraction
         bmRadius2d         = organoidRadius2d * bmRadiusFraction;
@@ -354,8 +362,11 @@ struct CryptBuddingParams
                       << "  BM=" << bmRadius3d << "  ECMmax=" << ecmMaxRadius3d << std::endl;
         }
 
-        t1Threshold2d = (ecmStiffness < 2.0) ? 0.2 : 0.15;
-        t2Threshold2d = 0.05;
+        // Model-specific T1/T2 thresholds if not overridden by config
+        if (!t1ThresholdOverridden)
+            t1Threshold2d = (ecmStiffness < 2.0) ? 0.2 : 0.15;
+        if (!t2ThresholdOverridden)
+            t2Threshold2d = 0.05;
 
         // Model-specific defaults for dt/endTime if not overridden
         if (modelType == "node2d")
@@ -566,8 +577,8 @@ struct CryptBuddingParams
         getDouble("ecmBaseSpeed", ecmBaseSpeed);
         getString("ecmGridType", ecmGridType);
 
-        getDouble("t1Threshold2d", t1Threshold2d);
-        getDouble("t2Threshold2d", t2Threshold2d);
+        if (configMap.count("t1Threshold2d")) { getDouble("t1Threshold2d", t1Threshold2d); t1ThresholdOverridden = true; }
+        if (configMap.count("t2Threshold2d")) { getDouble("t2Threshold2d", t2Threshold2d); t2ThresholdOverridden = true; }
 
         getDouble("bendingStiffness", bendingStiffness);
         getDouble("lumenExclusionStrength", lumenExclusionStrength);
