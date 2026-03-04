@@ -53,6 +53,7 @@
 #include "CellThicknessWriter.hpp"
 #include "CellProliferativeTypesWriter.hpp"
 #include "CellAgesWriter.hpp"
+#include "CellContactInhibitionStatusWriter.hpp"
 #include "FaceTypeWriter.hpp"
 
 #include "CryptBuddingParams.hpp"
@@ -199,6 +200,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     population.AddCellWriter<CellThicknessWriter>();
     population.AddCellWriter<CellProliferativeTypesWriter>();
     population.AddCellWriter<CellAgesWriter>();
+    population.AddCellWriter<CellContactInhibitionStatusWriter>();
     population.AddFaceWriter<FaceTypeWriter>();
 
     // ------------------------------------------------------------------
@@ -308,7 +310,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
 
     double totalSimTime = p.enableRelaxation ? (p.relaxationTime + p.endTime) : p.endTime;
     boost::shared_ptr<CryptBuddingSummaryModifier<3>> p_summary(
-        new CryptBuddingSummaryModifier<3>(p.ecmStiffness, p.samplingMultiple,
+        new CryptBuddingSummaryModifier<3>(p.ecmConfinementStiffness, p.samplingMultiple,
                                            totalSimTime, avgVol));
     simulator.AddSimulationModifier(p_summary);
 
@@ -389,7 +391,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
         {
             auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
             p_ecm_conf->SetECMField(pEcmField);
-            p_ecm_conf->SetConfinementStiffness(p.ecmStiffness);
+            p_ecm_conf->SetConfinementStiffness(p.ecmConfinementStiffness);
             p_ecm_conf->SetDegradationEnabled(true);
             p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
             p_ecm_conf->SetTrackCenter(true);
@@ -441,7 +443,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
         {
             auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
             p_ecm_conf->SetECMField(pEcmField);
-            p_ecm_conf->SetConfinementStiffness(p.ecmStiffness);
+            p_ecm_conf->SetConfinementStiffness(p.ecmConfinementStiffness);
             p_ecm_conf->SetDegradationEnabled(true);
             p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
             p_ecm_conf->SetTrackCenter(true);

@@ -48,6 +48,7 @@
 #include "CellAgesWriter.hpp"
 #include "CellProliferativeTypesCountWriter.hpp"
 #include "CellPolarityWriter.hpp"
+#include "CellContactInhibitionStatusWriter.hpp"
 #include "TangentialCentreBasedDivisionRule.hpp"
 
 #include "TimedForce.hpp"
@@ -161,6 +162,7 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
     population.AddCellWriter<CellIdWriter>();
     population.AddCellWriter<CellAgesWriter>();
     population.AddCellWriter<CellPolarityWriter>();
+    population.AddCellWriter<CellContactInhibitionStatusWriter>();
     population.AddCellPopulationCountWriter<CellProliferativeTypesCountWriter>();
 
     OffLatticeSimulation<3> simulator(population);
@@ -278,7 +280,7 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
     {
         auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
         p_ecm_conf->SetECMField(pEcmField);
-        p_ecm_conf->SetConfinementStiffness(p.ecmStiffness);
+        p_ecm_conf->SetConfinementStiffness(p.ecmConfinementStiffness);
         p_ecm_conf->SetDegradationEnabled(true);
         p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
         p_ecm_conf->SetTrackCenter(true);
@@ -316,7 +318,7 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
 
     double totalSimTime = p.enableRelaxation ? (p.relaxationTime + p.endTime) : p.endTime;
     boost::shared_ptr<CryptBuddingSummaryModifier<3>> p_summary(
-        new CryptBuddingSummaryModifier<3>(p.ecmStiffness, p.samplingMultiple,
+        new CryptBuddingSummaryModifier<3>(p.ecmConfinementStiffness, p.samplingMultiple,
                                            totalSimTime));
     simulator.AddSimulationModifier(p_summary);
 

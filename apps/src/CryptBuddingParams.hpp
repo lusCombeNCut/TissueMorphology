@@ -43,6 +43,7 @@ struct CryptBuddingParams
     bool enableDifferentialAdhesion;
     bool enableCellPolarity;
     bool enableEcmConfinement;
+    bool enableLumenHole;
     bool enableContinuousPvd;
 
     double dt;
@@ -84,6 +85,8 @@ struct CryptBuddingParams
 
     double springStiffness;
     double springCutoff;
+    double springStiffnessTAScale;    // TA cell spring stiffness = springStiffness × this
+    double springStiffnessDiffScale;  // Differentiated cell spring stiffness = springStiffness × this
     double apicalApicalAdhesion;
     double basalBasalAdhesion;
     double apicalBasalAdhesion;
@@ -122,6 +125,9 @@ struct CryptBuddingParams
     double ecmGridSpacing;
     double ecmBaseSpeed;
     std::string ecmGridType;     // "square" or "hex"
+    double ecmSpringRestLength;      // Rest length for cell-ECM springs (0 = adhesion to ECM position)
+    double ecmInteractionCutoff;     // Cutoff distance for cell-ECM spring interactions
+    double ecmConfinementStiffness;  // Spring stiffness for cell-ECM agent interactions (defaults to ecmStiffness)
 
     double t1Threshold2d;
     double t2Threshold2d;
@@ -179,6 +185,7 @@ struct CryptBuddingParams
         enableSloughing = true;
         enableDifferentialAdhesion = true;
         enableEcmConfinement = true;
+        enableLumenHole = true;
         enableContinuousPvd = false;
         endTimeOverridden = false;
         dtOverridden = false;
@@ -218,6 +225,8 @@ struct CryptBuddingParams
 
         springStiffness       = 30.0;
         springCutoff          = 1.5;
+        springStiffnessTAScale   = 1.0;   // TA spring stiffness multiplier (relative to stem)
+        springStiffnessDiffScale = 1.0;   // Differentiated/Paneth spring stiffness multiplier
         apicalApicalAdhesion  = 1.2;
         basalBasalAdhesion    = 1.0;
         apicalBasalAdhesion   = 0.5;
@@ -253,6 +262,9 @@ struct CryptBuddingParams
         ecmGridSpacing = 10.0;
         ecmBaseSpeed   = 0.3;
         ecmGridType    = "square";   // "square" or "hex"
+        ecmSpringRestLength      = 0.0;    // Rest length for cell-ECM springs
+        ecmInteractionCutoff     = 1.5;    // Cutoff distance for cell-ECM interactions
+        ecmConfinementStiffness  = -1.0;   // sentinel: falls back to ecmStiffness in Finalise()
 
         // Curvature bending force (Drasdo 2000 - monolayer enforcement)
         enableCurvatureBending    = true;   // Enable by default for node2d
@@ -270,7 +282,7 @@ struct CryptBuddingParams
         // Cell cycle duration (uniform random total cycle)
         stemCycleMin  = 12.0;   // U(12, 14) h total cycle for stem cells
         stemCycleMax  = 14.0;
-        taCycleRatio  = 1.0;    // TA cycle = ratio × stem cycle (set 0.5 for half)
+        taCycleRatio  = 0.5;    // TA cycle = ratio × stem cycle (set 0.5 for half)
 
         // Generational cascade (Meineke et al. 2001)
         enableGenerationalCascade = true;   // Enable Stem → TA → Differentiated cascade
@@ -288,7 +300,13 @@ struct CryptBuddingParams
 
     void Finalise()
     {
-        randomSeed = static_cast<unsigned>(ecmStiffness * 10000) + runNumber * 137;
+        // If ecmConfinementStiffness was not explicitly set, fall back to ecmStiffness
+        if (ecmConfinementStiffness < 0.0)
+        {
+            ecmConfinementStiffness = ecmStiffness;
+        }
+
+        randomSeed = static_cast<unsigned>(ecmConfinementStiffness * 10000) + runNumber * 137;
 
         // Derive organoidRadius2d from numCells so spacing = rest length (1.0)
         // spacing = 2πR / N = 1.0  →  R = N / (2π)
@@ -310,6 +328,7 @@ struct CryptBuddingParams
 
         bmStiffnessNode   = ecmStiffness;
         bmStiffnessVertex = ecmStiffness * 0.5;
+
         // Note: ecmDegradationRate and ecmDiffusionCoeff are loaded from config file
         // Only set defaults if not already set (SetDefaults handles this)
 
@@ -363,12 +382,16 @@ struct CryptBuddingParams
         }
 
         // Model-specific T1/T2 thresholds if not overridden by config
+        // WARNING: These are auto-derived from ecmConfinementStiffness. Set t1Threshold2d/t2Threshold2d
+        //          explicitly in your INI file to prevent this override.
         if (!t1ThresholdOverridden)
-            t1Threshold2d = (ecmStiffness < 2.0) ? 0.2 : 0.15;
+            t1Threshold2d = (ecmConfinementStiffness < 2.0) ? 0.2 : 0.15;
         if (!t2ThresholdOverridden)
             t2Threshold2d = 0.05;
 
         // Model-specific defaults for dt/endTime if not overridden
+        // WARNING: These are auto-derived and will silently override SetDefaults() values.
+        //          Set dt and endTime explicitly in your INI file to prevent this.
         if (modelType == "node2d")
         {
             if (!dtOverridden) dt = 0.005;
@@ -376,8 +399,8 @@ struct CryptBuddingParams
         else if (modelType == "vertex2d")
         {
             if (!dtOverridden)
-                dt = (ecmStiffness < 1.0) ? 0.0002
-                   : (ecmStiffness < 5.0) ? 0.0005
+                dt = (ecmConfinementStiffness < 1.0) ? 0.0002
+                   : (ecmConfinementStiffness < 5.0) ? 0.0005
                    :                        0.0005;
             if (!endTimeOverridden) endTime = 168.0;
         }
@@ -502,6 +525,7 @@ struct CryptBuddingParams
         getBool("enableCurvatureBending", enableCurvatureBending);
         getBool("enableCellPolarity", enableCellPolarity);
         getBool("enableEcmConfinement", enableEcmConfinement);
+        getBool("enableLumenHole", enableLumenHole);
         getBool("useTopologyBasedSprings", useTopologyBasedSprings);
         getBool("enableContinuousPvd", enableContinuousPvd);
 
@@ -543,6 +567,8 @@ struct CryptBuddingParams
 
         getDouble("springStiffness", springStiffness);
         getDouble("springCutoff", springCutoff);
+        getDouble("springStiffnessTAScale", springStiffnessTAScale);
+        getDouble("springStiffnessDiffScale", springStiffnessDiffScale);
         getDouble("apicalApicalAdhesion", apicalApicalAdhesion);
         getDouble("basalBasalAdhesion", basalBasalAdhesion);
         getDouble("apicalBasalAdhesion", apicalBasalAdhesion);
@@ -576,6 +602,9 @@ struct CryptBuddingParams
         getDouble("ecmGridSpacing", ecmGridSpacing);
         getDouble("ecmBaseSpeed", ecmBaseSpeed);
         getString("ecmGridType", ecmGridType);
+        getDouble("ecmSpringRestLength", ecmSpringRestLength);
+        getDouble("ecmInteractionCutoff", ecmInteractionCutoff);
+        getDouble("ecmConfinementStiffness", ecmConfinementStiffness);
 
         if (configMap.count("t1Threshold2d")) { getDouble("t1Threshold2d", t1Threshold2d); t1ThresholdOverridden = true; }
         if (configMap.count("t2Threshold2d")) { getDouble("t2Threshold2d", t2Threshold2d); t2ThresholdOverridden = true; }
@@ -635,13 +664,17 @@ struct CryptBuddingParams
         file << "enableDifferentialAdhesion = " << (enableDifferentialAdhesion ? "true" : "false") << "\n";
         file << "enableCurvatureBending = " << (enableCurvatureBending ? "true" : "false") << "\n";
         file << "enableCellPolarity = " << (enableCellPolarity ? "true" : "false") << "\n";
+        file << "enableLumenHole = " << (enableLumenHole ? "true" : "false") << "  # Clear ECM density inside organoid (creates central lumen)\n";
         file << "useTopologyBasedSprings = " << (useTopologyBasedSprings ? "true" : "false") << "  # true=topology (ring/surface), false=distance threshold\n";
         file << "enableContinuousPvd = " << (enableContinuousPvd ? "true" : "false") << "  # Keep .pvd files valid during simulation\n\n";
 
         file << "[ECM]\n";
-        file << "ecmStiffness = " << ecmStiffness << "       # Main ECM/BM stiffness parameter\n";
-        file << "bmStiffnessNode = " << bmStiffnessNode << "\n";
-        file << "bmStiffnessVertex = " << bmStiffnessVertex << "\n";
+        file << "ecmStiffness = " << ecmStiffness << "       # Legacy: only used by BasementMembraneForce in 3D models\n";
+        file << "ecmConfinementStiffness = " << ecmConfinementStiffness << "  # Spring stiffness for cell-ECM agent interactions\n";
+        file << "ecmSpringRestLength = " << ecmSpringRestLength << "  # Rest length for cell-ECM springs\n";
+        file << "ecmInteractionCutoff = " << ecmInteractionCutoff << "  # Cutoff distance for cell-ECM interactions\n";
+        file << "bmStiffnessNode = " << bmStiffnessNode << "  # 3D only: BasementMembraneForce stiffness (derived from ecmStiffness)\n";
+        file << "bmStiffnessVertex = " << bmStiffnessVertex << "  # 3D only: BasementMembraneForce stiffness (= ecmStiffness × 0.5)\n";
         file << "bmOffset3dVertex = " << bmOffset3dVertex << "\n";
         file << "ecmDegradationRate = " << ecmDegradationRate << "\n";
         file << "ecmDiffusionCoeff = " << ecmDiffusionCoeff << "  # Density smoothing coefficient\n\n";
@@ -673,6 +706,8 @@ struct CryptBuddingParams
         file << "# Spring/adhesion forces\n";
         file << "springStiffness = " << springStiffness << "\n";
         file << "springCutoff = " << springCutoff << "\n";
+        file << "springStiffnessTAScale = " << springStiffnessTAScale << "\n";
+        file << "springStiffnessDiffScale = " << springStiffnessDiffScale << "\n";
         file << "apicalApicalAdhesion = " << apicalApicalAdhesion << "\n";
         file << "basalBasalAdhesion = " << basalBasalAdhesion << "\n";
         file << "apicalBasalAdhesion = " << apicalBasalAdhesion << "\n\n";
@@ -738,6 +773,9 @@ struct CryptBuddingParams
         file << "ecmGridSpacing = " << ecmGridSpacing << "\n";
         file << "ecmBaseSpeed = " << ecmBaseSpeed << "\n";
         file << "ecmGridType = " << ecmGridType << "\n";
+        file << "ecmSpringRestLength = " << ecmSpringRestLength << "   # Rest length for cell-ECM springs\n";
+        file << "ecmInteractionCutoff = " << ecmInteractionCutoff << "  # Cutoff for cell-ECM interactions\n";
+        file << "ecmConfinementStiffness = " << ecmConfinementStiffness << "  # Spring stiffness for cell-ECM agent interactions\n";
 
         file.close();
         std::cout << "Saved parameters to: " << filePath << std::endl;

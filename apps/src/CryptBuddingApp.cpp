@@ -48,7 +48,7 @@
 
 int main(int argc, char* argv[])
 {
-    ExecutableSupport::StandardStartup(&argc, &argv);
+    ExecutableSupport::StartupWithoutShowingCopyright(&argc, &argv);
 
     int exit_code = ExecutableSupport::EXIT_OK;
     std::string outputSubdir;  // Stored here so catch block can access it
@@ -83,7 +83,7 @@ int main(int argc, char* argv[])
             std::stringstream subdir;
             subdir << "CryptBudding/" << TM_GIT_HASH
                    << "/" << params.modelType
-                   << "/stiffness_" << std::fixed << std::setprecision(1) << params.ecmStiffness
+                   << "/stiffness_" << std::fixed << std::setprecision(1) << params.ecmConfinementStiffness
                    << "/run_" << params.runNumber;
             outputSubdir = subdir.str();
 

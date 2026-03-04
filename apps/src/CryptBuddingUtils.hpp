@@ -173,7 +173,7 @@ inline void PrintBanner(const CryptBuddingParams& p)
     std::cout << "  Crypt Budding Simulation" << std::endl;
     std::cout << "  Git Commit:     " << TM_GIT_HASH << std::endl;
     std::cout << "  Model:          " << p.modelType << std::endl;
-    std::cout << "  ECM Stiffness:  " << p.ecmStiffness << std::endl;
+    std::cout << "  ECM Confinement: " << p.ecmConfinementStiffness << std::endl;
     std::cout << "  Run Number:     " << p.runNumber << std::endl;
     std::cout << "  Seed:           " << p.randomSeed << std::endl;
     std::cout << "  dt:             " << p.dt << std::endl;
@@ -201,16 +201,20 @@ inline void PrintBanner(const CryptBuddingParams& p)
         std::cout << "    Sloughing:               " << (p.enableSloughing ? "ON" : "OFF") << std::endl;
     if (p.enableDifferentialAdhesion)
         std::cout << "    Differential Adhesion:   ON" << std::endl;
-    if (p.modelType == "node3d")
+    if (p.modelType == "node2d" || p.modelType == "node3d")
     {
         std::cout << "    Curvature Bending:       " << (p.enableCurvatureBending ? "ON" : "OFF") << std::endl;
         std::cout << "    Cell Polarity:           " << (p.enableCellPolarity ? "ON" : "OFF") << std::endl;
-        std::cout << "    Topology-Based Springs:  " << (p.useTopologyBasedSprings ? "ON" : "OFF") << std::endl;
     }
-    if (p.modelType == "node2d")
+    if (p.modelType == "node2d" || p.modelType == "node3d")
         std::cout << "    Topology-Based Springs:  " << (p.useTopologyBasedSprings ? "ON" : "OFF") << std::endl;
     if (p.enableEcmConfinement)
-        std::cout << "    ECM Grid Type:           " << p.ecmGridType << std::endl;
+    {
+        std::cout << "    ECM Confinement Params:" << std::endl;
+        std::cout << "      Grid Type:             " << p.ecmGridType << std::endl;
+        std::cout << "      Grid Spacing:          " << p.ecmGridSpacing << std::endl;
+        std::cout << "      Degradation Rate:      " << p.ecmDegradationRate << std::endl;
+    }
     if (p.enableContinuousPvd)
         std::cout << "    Continuous PVD:          ON" << std::endl;
     std::cout << "============================================\n" << std::endl;

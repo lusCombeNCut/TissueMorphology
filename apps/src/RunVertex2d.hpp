@@ -39,6 +39,7 @@
 #include "CellAgesWriter.hpp"
 #include "CellVolumesWriter.hpp"
 #include "CellProliferativeTypesCountWriter.hpp"
+#include "CellContactInhibitionStatusWriter.hpp"
 
 #include "CryptBuddingParams.hpp"
 #include "CryptBuddingSummaryModifier.hpp"
@@ -143,6 +144,7 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
     population.AddCellWriter<CellIdWriter>();
     population.AddCellWriter<CellAgesWriter>();
     population.AddCellWriter<CellVolumesWriter>();
+    population.AddCellWriter<CellContactInhibitionStatusWriter>();
     population.AddCellPopulationCountWriter<CellProliferativeTypesCountWriter>();
 
     OffLatticeSimulation<2> simulator(population);
@@ -153,7 +155,7 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
 
     auto p_nh = boost::make_shared<FastNagaiHondaForce<2>>();
     // Note: Deformation energy should be ~100 (Nagai-Honda default) for area stability.
-    // ecmStiffness is used for ECM field stiffness, not the vertex deformation energy.
+    // ecmConfinementStiffness is used for ECM field stiffness, not the vertex deformation energy.
     p_nh->SetDeformationEnergyParameter(100.0);
     p_nh->SetMembraneSurfaceEnergyParameter(p.nhMembraneSurface);
     if (p.enableDifferentialAdhesion)
@@ -194,7 +196,9 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
     {
         MAKE_PTR(ECMConfinementForce<2>, p_ecm);
         p_ecm->SetECMField(p_ecm_field);
-        p_ecm->SetConfinementStiffness(p.ecmStiffness);
+        p_ecm->SetConfinementStiffness(p.ecmConfinementStiffness);
+        p_ecm->SetEcmSpringRestLength(p.ecmSpringRestLength);
+        p_ecm->SetEcmInteractionCutoff(p.ecmInteractionCutoff);
         p_ecm->SetDegradationEnabled(true);
         p_ecm->SetRemodelingEnabled(p.enableEcmGuidance);
         p_ecm->SetTrackCenter(true);
@@ -244,7 +248,7 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
     simulator.AddSimulationModifier(p_vol);
 
     boost::shared_ptr<CryptBuddingSummaryModifier<2>> p_summary(
-        new CryptBuddingSummaryModifier<2>(p.ecmStiffness, p.samplingMultiple, p.endTime));
+        new CryptBuddingSummaryModifier<2>(p.ecmConfinementStiffness, p.samplingMultiple, p.endTime));
     simulator.AddSimulationModifier(p_summary);
 
     // Continuous PVD shadow copies (keeps .pvd files valid for ParaView during simulation)

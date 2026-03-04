@@ -42,6 +42,7 @@
 #include "CellVolumesWriter.hpp"
 #include "CellProliferativeTypesCountWriter.hpp"
 #include "CellPolarityWriter.hpp"
+#include "CellContactInhibitionStatusWriter.hpp"
 #include "TangentialCentreBasedDivisionRule.hpp"
 
 #include "CryptBuddingParams.hpp"
@@ -145,6 +146,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
     population.AddCellWriter<CellAgesWriter>();
     population.AddCellWriter<CellVolumesWriter>();
     population.AddCellWriter<CellPolarityWriter>();
+    population.AddCellWriter<CellContactInhibitionStatusWriter>();
     population.AddCellPopulationCountWriter<CellProliferativeTypesCountWriter>();
 
     OffLatticeSimulation<2> simulator(population);
@@ -181,18 +183,24 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
         p_spring->SetMeinekeSpringStiffness(p.springStiffness);
         p_spring->SetCutOffLength(p.springCutoff);
         p_spring->SetRingTopologyTracker(p_ring_tracker.get());
+        p_spring->SetTAStiffnessScale(p.springStiffnessTAScale);
+        p_spring->SetDiffStiffnessScale(p.springStiffnessDiffScale);
         simulator.AddForce(p_spring);
     }
     else
     {
-        // Distance-threshold springs: standard GeneralisedLinearSpringForce
-        // applies springs between ALL node pairs within the cutoff distance.
-        boost::shared_ptr<GeneralisedLinearSpringForce<2, 2>> p_spring(
-            new GeneralisedLinearSpringForce<2, 2>());
+        // Distance-threshold springs: standard spring law applied
+        // between ALL node pairs within the cutoff distance.
+        // Uses RingSpringForce without a tracker (falls back to
+        // GeneralisedLinearSpringForce behaviour) so that per-cell-type
+        // stiffness scaling is still available.
+        MAKE_PTR(RingSpringForce<2>, p_spring);
         p_spring->SetMeinekeSpringStiffness(p.springStiffness);
         p_spring->SetCutOffLength(p.springCutoff);
         p_spring->SetMeinekeDivisionRestingSpringLength(0.5);
         p_spring->SetMeinekeSpringGrowthDuration(1.0);
+        p_spring->SetTAStiffnessScale(p.springStiffnessTAScale);
+        p_spring->SetDiffStiffnessScale(p.springStiffnessDiffScale);
         simulator.AddForce(p_spring);
     }
 
@@ -217,7 +225,9 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
     {
         MAKE_PTR(ECMConfinementForce<2>, p_ecm);
         p_ecm->SetECMField(p_ecm_field);
-        p_ecm->SetConfinementStiffness(p.ecmStiffness);
+        p_ecm->SetConfinementStiffness(p.ecmConfinementStiffness);
+        p_ecm->SetEcmSpringRestLength(p.ecmSpringRestLength);
+        p_ecm->SetEcmInteractionCutoff(p.ecmInteractionCutoff);
         p_ecm->SetDegradationEnabled(true);
         p_ecm->SetRemodelingEnabled(p.enableEcmGuidance);
         p_ecm->SetTrackCenter(true);
@@ -285,7 +295,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
 
     double totalSimTime = p.enableRelaxation ? (p.relaxationTime + p.endTime) : p.endTime;
     boost::shared_ptr<CryptBuddingSummaryModifier<2>> p_summary(
-        new CryptBuddingSummaryModifier<2>(p.ecmStiffness, p.samplingMultiple,
+        new CryptBuddingSummaryModifier<2>(p.ecmConfinementStiffness, p.samplingMultiple,
                                            totalSimTime));
     simulator.AddSimulationModifier(p_summary);
 
