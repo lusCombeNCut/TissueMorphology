@@ -810,6 +810,108 @@ public:
     void SetDegradationRate(double rate) { mDegradationRate = rate; }
     void SetDepositionRate(double rate) { mDepositionRate = rate; }
     void SetDiffusionCoeff(double coeff) { mDiffusionCoeff = coeff; }
+    double GetDiffusionCoeff() const { return mDiffusionCoeff; }
+
+    /**
+     * Get the grid spacing.
+     */
+    double GetGridSpacing() const { return mGridSpacing; }
+
+    /**
+     * Get grid dimensions.
+     */
+    int GetNx() const { return mNx; }
+    int GetNy() const { return mNy; }
+
+    /**
+     * Get the position of a grid element by flat index.
+     */
+    c_vector<double, 2> GetElementPosition(int flatIndex) const
+    {
+        int i = flatIndex % mNx;
+        int j = flatIndex / mNx;
+        return GetCellPosition(i, j);
+    }
+
+    /**
+     * Get density of a grid element by flat index.
+     */
+    double GetDensityByIndex(int flatIndex) const
+    {
+        return mGrid[flatIndex].density;
+    }
+
+    /**
+     * Get total number of grid elements.
+     */
+    int GetNumElements() const { return mNx * mNy; }
+
+    /**
+     * Get ECM elements near a given position, within a cutoff distance.
+     * Only returns elements with density above a threshold.
+     * Efficiently searches only the local grid region.
+     *
+     * @param position     query position
+     * @param cutoff       maximum distance to include
+     * @param rPositions   output: positions of nearby elements
+     * @param rDensities   output: densities of nearby elements
+     * @param densityThreshold minimum density to include (default 1e-6)
+     */
+    void GetNearbyElements(c_vector<double, 2> position,
+                           double cutoff,
+                           std::vector<c_vector<double, 2>>& rPositions,
+                           std::vector<double>& rDensities,
+                           double densityThreshold = 1e-6) const
+    {
+        rPositions.clear();
+        rDensities.clear();
+
+        double cutoff2 = cutoff * cutoff;
+
+        // Compute grid index range based on position ± cutoff
+        int iMin, iMax, jMin, jMax;
+        if (mIsHex)
+        {
+            jMin = (int)floor((position[1] - cutoff - mYMin) / mRowSpacing);
+            jMax = (int)ceil((position[1] + cutoff - mYMin) / mRowSpacing);
+            iMin = (int)floor((position[0] - cutoff - mXMin) / mGridSpacing) - 1;
+            iMax = (int)ceil((position[0] + cutoff - mXMin) / mGridSpacing) + 1;
+        }
+        else
+        {
+            iMin = (int)floor((position[0] - cutoff - mXMin) / mGridSpacing);
+            iMax = (int)ceil((position[0] + cutoff - mXMin) / mGridSpacing);
+            jMin = (int)floor((position[1] - cutoff - mYMin) / mGridSpacing);
+            jMax = (int)ceil((position[1] + cutoff - mYMin) / mGridSpacing);
+        }
+
+        // Clamp to grid bounds
+        iMin = std::max(0, iMin);
+        iMax = std::min(mNx - 1, iMax);
+        jMin = std::max(0, jMin);
+        jMax = std::min(mNy - 1, jMax);
+
+        for (int j = jMin; j <= jMax; j++)
+        {
+            for (int i = iMin; i <= iMax; i++)
+            {
+                int idx = FlatIndex(i, j);
+                double density = mGrid[idx].density;
+                if (density < densityThreshold) continue;
+
+                c_vector<double, 2> elemPos = GetCellPosition(i, j);
+                double dx = elemPos[0] - position[0];
+                double dy = elemPos[1] - position[1];
+                double dist2 = dx * dx + dy * dy;
+
+                if (dist2 < cutoff2)
+                {
+                    rPositions.push_back(elemPos);
+                    rDensities.push_back(density);
+                }
+            }
+        }
+    }
 
     /**
      * Clear ECM density inside a given radius from a center point.

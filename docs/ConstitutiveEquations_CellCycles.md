@@ -5,39 +5,72 @@ their mathematical formulations, phase structure, and literature references.
 
 ---
 
-## Contact Inhibition Cell Cycle Model
+## Uniform Contact Inhibition Cell Cycle Model
 
-**Source:** `Chaste/cell_based/src/cell/cycle/ContactInhibitionCellCycleModel.{hpp,cpp}`
+**Source:**
+- `projects/TissueMorphology/src/UniformContactInhibitionGenerationalCellCycleModel.hpp` **(default)**
+- `projects/TissueMorphology/src/UniformContactInhibitionCellCycleModel.hpp` (simple variant)
 
 **Used in:** All four model configurations (node2d, vertex2d, node3d, vertex3d)
 
-A volume-dependent cell cycle model in which cells become **quiescent** (G1-arrested)
-when they are mechanically compressed below a threshold volume. This implements
-*contact inhibition of proliferation* — a cornerstone mechanism of epithelial
-homeostasis.
+**Selection:** Controlled by `enableGenerationalCascade` in config:
+- `true` (default) → **UniformContactInhibitionGenerationalCellCycleModel** with Meineke cascade
+- `false` → **UniformContactInhibitionCellCycleModel** (no generation tracking)
+
+A custom cell cycle model that extends Chaste's `ContactInhibitionCellCycleModel` with:
+1. **Stochastic total cycle duration** drawn from a uniform distribution
+2. **Generational cascade** (Meineke et al. 2001) for Stem → TA → Differentiated progression (when enabled)
+
+Cells become **quiescent** (G1-arrested) when mechanically compressed below a threshold
+volume, implementing *contact inhibition of proliferation*.
 
 ### Cell Cycle Phases
 
-([AbstractSimplePhaseBasedCellCycleModel.cpp, `SetG1Duration`](../../../cell_based/src/cell/cycle/AbstractSimplePhaseBasedCellCycleModel.cpp);
-[AbstractPhaseBasedCellCycleModel.cpp, constructor](../../../cell_based/src/cell/cycle/AbstractPhaseBasedCellCycleModel.cpp))
+([UniformContactInhibitionGenerationalCellCycleModel.hpp, `SetG1Duration`](../src/UniformContactInhibitionGenerationalCellCycleModel.hpp))
 
-The cell cycle follows the standard $M \to G_1 \to S \to G_2 \to M$ sequence.
-Phase assignment is based on cell age $t$ since birth:
+The S and G2 phases are **collapsed to zero**, leaving only M and G1:
 
-| Phase | Condition | Default Duration |
-|-------|-----------|------------------|
-| M (mitosis) | $t < T_M$ | 1.0 h |
-| G1 (gap 1) | $T_M \le t < T_M + T_{G_1}$ | 14.0 h (stem) / 2.0 h (transit) — deterministic |
-| S (synthesis) | $T_M + T_{G_1} \le t < T_M + T_{G_1} + T_S$ | 5.0 h |
-| G2 (gap 2) | $T_M + T_{G_1} + T_S \le t < T_{\text{cycle}}$ | 4.0 h |
+| Phase | Condition | Duration |
+|-------|-----------|----------|
+| M (mitosis) | $t < T_M$ | 1.0 h (fixed) |
+| G1 (gap 1) | $T_M \le t < T_{\text{cycle}}$ | $T_{\text{total}} - T_M$ (stochastic) |
+| S (synthesis) | — | 0 h (collapsed) |
+| G2 (gap 2) | — | 0 h (collapsed) |
 | G0 (quiescence) | Differentiated cells | permanent arrest |
 
-> **Note:** `ContactInhibitionCellCycleModel` uses `AbstractSimplePhaseBasedCellCycleModel`,
-> which assigns G1 duration **deterministically** (not stochastically). The base G1
-> is exactly 14.0 h for stem cells and 2.0 h for transit cells. These are then
-> extended by contact inhibition when the cell is compressed.
+> **Note:** Unlike the base `ContactInhibitionCellCycleModel`, this custom model draws
+> the **total cycle time** from a uniform distribution, then computes G1 as the remainder
+> after subtracting the M-phase duration.
 
 **Differentiated cells** are permanently arrested in G0 and never divide.
+
+### Stochastic Cycle Duration
+
+([UniformContactInhibitionGenerationalCellCycleModel.hpp, `SetG1Duration`](../src/UniformContactInhibitionGenerationalCellCycleModel.hpp))
+
+Total cell cycle duration is drawn from a uniform distribution:
+
+**Stem cells:**
+$$
+T_{\text{total}} \sim U(T_{\min}, T_{\max})
+$$
+
+**Transit-amplifying cells:**
+$$
+T_{\text{total}} \sim U(T_{\min}, T_{\max}) \times r_{\text{TA}}
+$$
+
+where $r_{\text{TA}}$ is the transit cycle ratio (default 1.0 = same as stem).
+
+**G1 duration** is then computed as the remainder:
+$$
+T_{G_1} = \max\bigl(T_{\text{gap,min}},\; T_{\text{total}} - T_M\bigr)
+$$
+
+**Differentiated cells:**
+$$
+T_{G_1} = \infty \quad \text{(permanent G0 arrest)}
+$$
 
 ### Contact Inhibition Rule
 
@@ -70,25 +103,31 @@ compressed, providing negative feedback between cell density and proliferation.
 A cell divides when:
 
 $$
-t_{\text{age}} \ge T_M + T_{G_1} + T_S + T_{G_2}
+t_{\text{age}} \ge T_M + T_{G_1}
 $$
 
-The total cell cycle time is therefore:
+Since S and G2 phases are collapsed ($T_S = T_{G_2} = 0$), the total cell cycle time simplifies to:
 
 $$
-T_{\text{cycle}} = T_M + T_{G_1}(\text{extended by contact inhibition}) + T_S + T_{G_2}
+T_{\text{cycle}} = T_M + T_{G_1}(\text{extended by contact inhibition})
 $$
+
+With the stochastic duration drawn from $U(T_{\min}, T_{\max})$, a non-quiescent cell
+will typically divide in 12–14 hours (default parameters).
 
 ### Parameters
 
-| Symbol | Parameter | Default | CryptBudding |
-|--------|-----------|---------|--------------|
+| Symbol | Parameter | Default | CryptBudding Config |
+|--------|-----------|---------|---------------------|
 | $V_{\text{eq}}$ | `mEquilibriumVolume` | must be set | 1.0 (node) or target area (vertex) |
-| $f_q$ | `mQuiescentVolumeFraction` | must be set | 0.7 |
-| $T_M$ | M-phase duration | 1.0 h | 1.0 h |
-| $T_S$ | S-phase duration | 5.0 h | 5.0 h |
-| $T_{G_2}$ | G2-phase duration | 4.0 h | 4.0 h |
-| $T_{G_1}$ | G1 duration (base, deterministic) | 14.0 h (stem) / 2.0 h (transit) | same |
+| $f_q$ | `mQuiescentVolumeFraction` | must be set | **0.5** (`quiescentFraction`) |
+| $T_M$ | M-phase duration | 1.0 h | 1.0 h (fixed) |
+| $T_S$ | S-phase duration | 5.0 h | **0 h** (collapsed) |
+| $T_{G_2}$ | G2-phase duration | 4.0 h | **0 h** (collapsed) |
+| $T_{\min}$ | `mTotalCycleMin` | 12.0 h | **12.0 h** (`stemCycleMin`) |
+| $T_{\max}$ | `mTotalCycleMax` | 14.0 h | **14.0 h** (`stemCycleMax`) |
+| $r_{\text{TA}}$ | `mTransitCycleRatio` | 1.0 | **1.0** (`taCycleRatio`) |
+| — | `maxTransitGenerations` | 3 | **3** (generational model only) |
 
 ### Cell Proliferative Types
 
@@ -97,12 +136,12 @@ random probabilities:
 
 | Type | Fraction | Behaviour |
 |------|----------|-----------|
-| **Stem** (`StemCellProliferativeType`) | 20% | Full cell cycle ($T_{\text{cycle}}$ = 24.0 h base), self-renewal |
-| **Transit-amplifying** (`TransitCellProliferativeType`) | 50% | Full cell cycle ($T_{\text{cycle}}$ = 12.0 h base), limited divisions |
-| **Differentiated** (`DifferentiatedCellProliferativeType`) | 30% | Permanently in G0, no division |
+| **Stem** (`StemCellProliferativeType`) | **42%** | Full cell cycle, self-renewal (gen=0) |
+| **Transit-amplifying** (`TransitCellProliferativeType`) | **49%** | Full cell cycle, limited divisions (gen 1–3) |
+| **Differentiated** (`DifferentiatedCellProliferativeType`) | **9%** | Permanently in G0, no division |
 
 The type fractions are configurable via `stemFraction` and `transitFraction`
-parameters.
+parameters in the INI config file.
 
 ### Phase Diagram
 
@@ -112,44 +151,111 @@ parameters.
                             └────┬────┘
                                  │
                             ┌────▼────┐
-                            │    M    │  (1h)
+                            │    M    │  (1h fixed)
                             └────┬────┘
                                  │
                  ┌───────────────▼───────────────┐
                  │              G1               │
+                 │    (total − 1h, stochastic)   │
                  │                               │
                  │   V_cell < V_q ? ──► ARREST   │  (extended)
                  │   V_cell ≥ V_q ? ──► PROCEED  │
                  └───────────────┬───────────────┘
                                  │
-                            ┌────▼────┐
-                            │    S    │  (5h)
-                            └────┬────┘
-                                 │
-                            ┌────▼────┐
-                            │   G2    │  (4h)
-                            └────┬────┘
+                        (S and G2 collapsed)
                                  │
                             ┌────▼────┐
                             │ DIVIDE  │
                             └─────────┘
 ```
 
-### Interaction with Volume Tracking
+---
+
+## Generational Cascade Model (Meineke et al. 2001)
+
+**Source:** `projects/TissueMorphology/src/UniformContactInhibitionGenerationalCellCycleModel.hpp`
+
+**Enabled by:** `enableGenerationalCascade = true` in config
+
+When enabled, stem cell divisions follow the **Meineke generational cascade**:
+
+### Division Rules
+
+([UniformContactInhibitionGenerationalCellCycleModel.hpp](../src/UniformContactInhibitionGenerationalCellCycleModel.hpp))
+
+**Stem cell division** (generation = 0):
+- Parent cell: remains Stem, generation reset to 0
+- Daughter cell: becomes TA, generation set to 1
+
+**Transit-amplifying cell division** (generation 1 to `maxTransitGenerations`):
+- Both parent and daughter increment their generation
+- If generation > `maxTransitGenerations`: cell becomes Differentiated
+
+**Differentiated cells**: Permanently arrested in G0, never divide.
+
+### Generation Cascade Diagram
+
+```
+                    ┌──────────────────┐
+                    │   STEM (gen=0)   │
+                    │  self-renewing   │
+                    └────────┬─────────┘
+                             │ division
+              ┌──────────────┴──────────────┐
+              │                             │
+       ┌──────▼──────┐              ┌───────▼──────┐
+       │ STEM (gen=0)│              │  TA (gen=1)  │
+       │   (parent)  │              │  (daughter)  │
+       └─────────────┘              └───────┬──────┘
+                                            │ division
+                                     ┌──────▼──────┐
+                                     │  TA (gen=2) │
+                                     └──────┬──────┘
+                                            │ division
+                                     ┌──────▼──────┐
+                                     │  TA (gen=3) │
+                                     └──────┬──────┘
+                                            │ division (gen > max)
+                                   ┌────────▼────────┐
+                                   │ DIFFERENTIATED  │
+                                   │   (no division) │
+                                   └─────────────────┘
+```
+
+### Parameters (Generational Model)
+
+| Parameter | Config Key | Default | Description |
+|-----------|------------|---------|-------------|
+| Max TA generations | `maxTransitGenerations` | 3 | TA divisions before differentiation |
+| Enable cascade | `enableGenerationalCascade` | true | Use generational vs simple model |
+
+### References (Generational Cascade)
+
+- Meineke, F.A., Potten, C.S. & Loeffler, M. (2001). Cell migration and organization
+  in the intestinal crypt using a lattice-free model. *Cell Proliferation*, 34(4),
+  253–266. doi:[10.1046/j.0960-7722.2001.00216.x](https://doi.org/10.1046/j.0960-7722.2001.00216.x)
+
+---
+
+## Interaction with Volume Tracking
 
 The cell cycle model reads the `volume` item from `CellData`, which is updated at
 every time step by the `VolumeTrackingModifier`. In vertex models, the
 `SimpleTargetAreaModifier` (2D) or `GeometricalTargetVolumeModifier` (3D) also
 updates a `target area` / target volume used for growth.
 
-### Two-Phase Simulation Protocol
+---
+
+## Two-Phase Simulation Protocol
 
 During the **relaxation phase** (Phase 1), all cells are temporarily set to
 `DifferentiatedCellProliferativeType` → G0 arrest, ensuring no proliferation while
 the initial geometry equilibrates. Original cell types are restored before the
 **growth phase** (Phase 2).
 
-### References
+---
+
+## General References
 
 - Shraiman, B.I. (2005). Mechanical feedback as a possible regulator of tissue growth. *Proceedings of the National Academy of Sciences*, 102(9), 3318–3323. doi:[10.1073/pnas.0404782102](https://doi.org/10.1073/pnas.0404782102)
 - Nelson, C.M. & Chen, C.S. (2002). Cell-cell signaling by direct contact increases cell proliferation via a PI3K-dependent signal. *FEBS Letters*, 514(2–3), 238–242.

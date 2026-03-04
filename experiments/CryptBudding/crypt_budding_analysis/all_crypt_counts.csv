@@ -1,0 +1,12 @@
+model,stiffness,replicate,num_crypts,circularity,sphericity
+node2d,1.0,0,0,0.759793,
+node2d,1.0,1,0,0.512183,
+node2d,1.0,2,0,0.347091,
+node2d,5.0,0,0,0.036819,
+node2d,5.0,1,0,,
+node2d,5.0,2,0,0.900758,
+node2d,5.0,3,0,0.752382,
+node2d,10.0,0,0,0.876992,
+node2d,10.0,1,0,0.728869,
+node2d,10.0,2,0,0.909463,
+node2d,50.0,0,0,0.848387,

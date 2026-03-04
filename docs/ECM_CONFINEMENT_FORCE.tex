@@ -1,0 +1,101 @@
+\subsection{Agent-Based Cell--ECM Interaction Model}
+\label{sec:ecm_confinement}
+
+The extracellular matrix (ECM) surrounding an organoid provides both structural confinement and adhesive anchorage.
+In the present model, the ECM is discretised onto a spatial grid and each grid element is treated as an independent mechanical agent that interacts with nearby cells through linear springs.
+This agent-based formulation captures two essential properties of the basement membrane that a simple radial boundary condition cannot: tangential adhesion, which anchors the tissue in place, and density-dependent force transmission, which couples matrix degradation to local mechanical release.
+
+\subsubsection{ECM Field Representation}
+
+The ECM is stored on a two-dimensional grid (square or hexagonal) with spacing $h$ that tiles the simulation domain.
+Each grid element $j$ carries a scalar density field $\rho_j \in [0,1]$, representing the local concentration of matrix material, and a fibre orientation angle $\theta_j$ for optional contact guidance.
+The grid is initialised with $\rho_j = 1$ outside the organoid boundary and $\rho_j = 0$ inside the lumen and epithelial layer, reflecting the biological arrangement in which basement membrane components such as laminin and collagen~IV are deposited basolaterally \cite{Yurchenco2011}.
+
+\subsubsection{Cell--ECM Spring Force Law}
+
+Each cell $i$ located at position $\mathbf{x}_i$ interacts with all ECM elements whose centres $\mathbf{x}_j^{\text{ECM}}$ lie within a cutoff distance $d_{\text{cut}}$.
+For each such pair, the force on cell $i$ due to ECM element $j$ is given by
+
+\begin{equation}
+    \mathbf{F}_{ij}^{\text{ECM}} = k_{\text{ECM}}\;\rho_j\;\bigl(d_{ij} - s_0\bigr)\;\hat{\mathbf{d}}_{ij},
+    \label{eq:ecm_spring}
+\end{equation}
+
+\noindent where
+\begin{itemize}
+    \item $k_{\text{ECM}}$ is the cell--ECM spring stiffness,
+    \item $\rho_j \in [0,1]$ is the ECM density at element $j$, acting as a force multiplier,
+    \item $d_{ij} = \lVert \mathbf{x}_j^{\text{ECM}} - \mathbf{x}_i \rVert$ is the distance between the cell and the ECM element,
+    \item $s_0$ is the spring rest length,
+    \item $\hat{\mathbf{d}}_{ij} = (\mathbf{x}_j^{\text{ECM}} - \mathbf{x}_i) / d_{ij}$ is the unit vector from cell to ECM element.
+\end{itemize}
+
+\noindent The total ECM force on cell $i$ is the sum over all interacting elements:
+
+\begin{equation}
+    \mathbf{F}_i^{\text{ECM}} = \sum_{j:\, d_{ij} < d_{\text{cut}}} k_{\text{ECM}}\;\rho_j\;\bigl(d_{ij} - s_0\bigr)\;\hat{\mathbf{d}}_{ij}.
+    \label{eq:ecm_total}
+\end{equation}
+
+A key design decision is that the force law in Equation~\eqref{eq:ecm_spring} is \emph{purely linear} in the overlap $(d_{ij} - s_0)$.
+Standard cell--cell spring forces in node-based models employ a logarithmic repulsion term for overlapping cells, $F \propto \ln(1 + \delta/s_0)$, which diverges as $\delta \to -s_0$, and an exponentially decaying attraction, $F \propto \delta\,\exp(-\alpha\,\delta/s_0)$, for separated cells \cite{Meineke2001}.
+These nonlinearities are appropriate for cell--cell contact, where volume exclusion creates a hard-core repulsion.
+However, for cell--ECM interaction, the biological reality is that cells migrate \emph{through} the matrix by proteolytic degradation of ECM fibres via matrix metalloproteinases (MMPs) and by squeezing through pores in the network \cite{Wolf2013}.
+A divergent repulsive force would artificially prevent this behaviour.
+The linear law permits cells to overlap with ECM elements at a finite, bounded force, with the physical resistance controlled instead by the density-dependent prefactor $\rho_j$: degraded matrix ($\rho_j \to 0$) offers negligible resistance regardless of overlap.
+
+\subsubsection{Density-Dependent Force Scaling}
+
+The inclusion of $\rho_j$ as a multiplicative factor in Equation~\eqref{eq:ecm_spring} creates a natural coupling between ECM remodelling and mechanical confinement.
+In regions where matrix metalloproteinase (MMP) secretion has reduced the local density, the spring force vanishes proportionally.
+This produces a mechanochemical feedback loop: proliferating cells crowd toward the ECM boundary, secrete MMPs that locally degrade the matrix, and the resulting reduction in confinement force permits outward budding.
+The density evolves via
+
+\begin{equation}
+    \rho_j^{n+1} = \max\!\bigl(0,\;\rho_j^n - k_{\text{deg}}\,\Delta t\bigr),
+    \label{eq:ecm_degradation}
+\end{equation}
+
+\noindent where $k_{\text{deg}}$ is the degradation rate per cell per unit time and the $\max$ operator prevents unphysical negative densities.
+A diffusion step smooths the density field at each timestep, representing cross-linking and lateral spreading of matrix material \cite{Lu2011}:
+
+\begin{equation}
+    \rho_j^{n+1} \leftarrow \rho_j^{n+1} + D\,\Delta t\,\bigl(\bar{\rho}_j - \rho_j^{n+1}\bigr),
+    \label{eq:ecm_diffusion}
+\end{equation}
+
+\noindent where $D$ is the diffusion coefficient and $\bar{\rho}_j$ is the mean density of the neighbouring grid elements.
+
+\subsubsection{Tangential Anchoring and Rotational Stability}
+
+Treating each ECM element as an individual spring agent, rather than applying a single radial force directed toward the tissue centroid, introduces force components in all spatial directions.
+Consider a cell sitting at the organoid boundary: it is connected by springs to multiple ECM elements arranged around its exterior.
+If the organoid were to undergo rigid-body rotation, each cell would move tangentially relative to its anchoring ECM elements, stretching those springs and generating restoring forces that oppose the rotation.
+Similarly, a bulk translation of the entire tissue stretches springs asymmetrically, producing a net restoring force.
+This emergent resistance to rigid-body motion arises naturally from the spatial distribution of spring connections and does not require any explicit penalty term.
+
+This property is a direct consequence of modelling the ECM as a discrete viscoelastic material rather than an isotropic pressure.
+Experimental studies of Matrigel-embedded organoids confirm that the basement membrane provides both radial confinement and tangential adhesion through integrin--laminin binding \cite{Gjorevski2016}, and that disruption of these adhesions (e.g.\ via integrin-blocking antibodies) permits organoid drift and deformation.
+The agent-based spring model captures this dual mechanical role without requiring separate force terms for confinement and adhesion.
+
+\subsubsection{Summary of Parameters}
+
+Table~\ref{tab:ecm_params} lists the configurable parameters for the cell--ECM interaction force.
+
+\begin{table}[h]
+    \centering
+    \caption{Parameters governing the cell--ECM confinement force.}
+    \label{tab:ecm_params}
+    \begin{tabular}{lll}
+        \hline
+        \textbf{Symbol} & \textbf{Parameter} & \textbf{Default} \\
+        \hline
+        $k_{\text{ECM}}$  & \texttt{ecmConfinementStiffness} & 5.0 \\
+        $s_0$             & \texttt{ecmSpringRestLength}     & 0.0 \\
+        $d_{\text{cut}}$  & \texttt{ecmInteractionCutoff}    & 1.5 \\
+        $h$               & \texttt{ecmGridSpacing}          & 0.25 \\
+        $k_{\text{deg}}$  & \texttt{ecmDegradationRate}      & 0.5 \\
+        $D$               & \texttt{ecmDiffusionCoeff}       & 0.1 \\
+        \hline
+    \end{tabular}
+\end{table}

@@ -114,6 +114,13 @@ fi
 # =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="$(cd "$SCRIPT_DIR" && cd "$OUTPUT_BASE" && pwd)"
+
+# Job-specific subdirectory for downloads
+JOB_OUTPUT_DIR=""
+if [[ -n "$JOB_DIR" ]]; then
+  JOB_OUTPUT_DIR="$OUTPUT_DIR/$JOB_DIR"
+fi
+
 MERGED_DIR="$OUTPUT_DIR/merged"
 ANALYSIS_OUT="$OUTPUT_DIR/crypt_analysis_output"
 TIMESTEP_OUT="$OUTPUT_DIR/timestep_analysis_output"
@@ -132,6 +139,7 @@ echo "  Output directory:  $OUTPUT_DIR"
 if [[ "$SKIP_SCP" == false ]]; then
   echo "  Remote host:       $REMOTE_HOST"
   echo "  Job directory:     $JOB_DIR"
+  echo "  Download to:       $JOB_OUTPUT_DIR"
   echo "  Full remote path:  $REMOTE_DIR/archives/"
 fi
 echo "  Model filter:      ${MODEL_FILTER:-all}"
@@ -150,6 +158,9 @@ if [[ "$SKIP_SCP" == false ]]; then
   echo "  Step 1: Downloading archives from BluePebble"
   echo "======================================================================="
   
+  # Create job-specific subdirectory
+  mkdir -p "$JOB_OUTPUT_DIR"
+  
   ARCHIVES_PATH="${REMOTE_DIR}/archives"
   
   # Build archive pattern for filtering
@@ -165,19 +176,19 @@ if [[ "$SKIP_SCP" == false ]]; then
     echo "  Fetching archives for runs: ${RUN_FILTER}"
     for pattern in "${PATTERNS[@]}"; do
       echo "    Pattern: $pattern"
-      scp "${REMOTE_HOST}:${ARCHIVES_PATH}/${pattern}" "$OUTPUT_DIR/" || true
+      scp "${REMOTE_HOST}:${ARCHIVES_PATH}/${pattern}" "$JOB_OUTPUT_DIR/" || true
     done
   else
     # Fetch all archives
     echo "  Fetching all archives from: ${REMOTE_HOST}:${ARCHIVES_PATH}/"
-    scp "${REMOTE_HOST}:${ARCHIVES_PATH}/*.tar.gz" "$OUTPUT_DIR/" || {
+    scp "${REMOTE_HOST}:${ARCHIVES_PATH}/*.tar.gz" "$JOB_OUTPUT_DIR/" || {
       echo "  ERROR: Failed to download archives"
       exit 1
     }
   fi
   
   # Count downloaded archives
-  NUM_ARCHIVES=$(ls "$OUTPUT_DIR"/*.tar.gz 2>/dev/null | wc -l)
+  NUM_ARCHIVES=$(ls "$JOB_OUTPUT_DIR"/*.tar.gz 2>/dev/null | wc -l)
   echo "  Downloaded $NUM_ARCHIVES archives"
   echo ""
   
@@ -186,7 +197,7 @@ if [[ "$SKIP_SCP" == false ]]; then
   echo "  Step 2: Extracting archives"
   echo "======================================================================="
   
-  cd "$OUTPUT_DIR"
+  cd "$JOB_OUTPUT_DIR"
   for archive in *.tar.gz; do
     [[ -e "$archive" ]] || continue
     echo "  Extracting: $archive"
@@ -207,6 +218,15 @@ if [[ "$SKIP_ANALYSIS" == false ]]; then
   # Remove old merged directory if it exists
   rm -rf "$MERGED_DIR"
   
+  # Determine search directory for extracted archives
+  # If we downloaded, use job-specific dir; otherwise search all job dirs
+  if [[ -n "$JOB_OUTPUT_DIR" && -d "$JOB_OUTPUT_DIR" ]]; then
+    SEARCH_DIRS=("$JOB_OUTPUT_DIR")
+  else
+    # Find all job directories when --skip-scp is used
+    SEARCH_DIRS=("$OUTPUT_DIR"/*_*_*-*-*_*-*-*/)
+  fi
+  
   # Determine which models to merge
   MODELS_TO_MERGE=()
   if [[ -n "$MODEL_FILTER" ]]; then
@@ -215,9 +235,12 @@ if [[ "$SKIP_ANALYSIS" == false ]]; then
     # Auto-detect models from extracted directories
     # App output: s*_r*/CryptBudding/<git_hash>/<model>/stiffness_*/run_*
     for model in node2d vertex2d node3d vertex3d; do
-      if ls -d "$OUTPUT_DIR"/s*_r*/CryptBudding/*/"$model" 2>/dev/null | head -1 | grep -q .; then
-        MODELS_TO_MERGE+=("$model")
-      fi
+      for search_dir in "${SEARCH_DIRS[@]}"; do
+        if ls -d "$search_dir"/s*_r*/CryptBudding/*/"$model" 2>/dev/null | head -1 | grep -q .; then
+          MODELS_TO_MERGE+=("$model")
+          break
+        fi
+      done
     done
   fi
   
@@ -229,7 +252,8 @@ if [[ "$SKIP_ANALYSIS" == false ]]; then
     
     # Create symlinks at the run level
     # App output: s*_r*/CryptBudding/<git_hash>/<model>/stiffness_*/run_*
-    for sdir in "$OUTPUT_DIR"/s*_r*/CryptBudding/*/"$model"/stiffness_*; do
+    for search_dir in "${SEARCH_DIRS[@]}"; do
+    for sdir in "$search_dir"/s*_r*/CryptBudding/*/"$model"/stiffness_*; do
       [[ -d "$sdir" ]] || continue
       
       stiff=$(basename "$sdir")
@@ -253,6 +277,7 @@ if [[ "$SKIP_ANALYSIS" == false ]]; then
         fi
       done
     done
+    done  # end search_dir loop
   done
   
   echo "  Merged directory created at: $MERGED_DIR"
@@ -280,6 +305,9 @@ if [[ "$SKIP_ANALYSIS" == false ]]; then
     --base-dir "$MERGED_DIR" \
     $MODEL_ARG \
     -o "$ANALYSIS_OUT" \
+    --method fourier \
+    --use-outline \
+    --debug-plots \
     2>&1 | tee "$ANALYSIS_OUT/analysis.log"
   
   echo ""

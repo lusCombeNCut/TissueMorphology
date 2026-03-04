@@ -23,10 +23,16 @@
 
 #include "ChasteSerialization.hpp"
 #include <boost/serialization/base_object.hpp>
+#include <cmath>
 
 #include "GeneralisedLinearSpringForce.hpp"
 #include "RingTopologyTracker.hpp"
 #include "SimProfiler.hpp"
+
+#include "StemCellProliferativeType.hpp"
+#include "TransitCellProliferativeType.hpp"
+#include "DifferentiatedCellProliferativeType.hpp"
+#include "AbstractCellPopulation.hpp"
 
 template<unsigned DIM>
 class RingSpringForce : public GeneralisedLinearSpringForce<DIM, DIM>
@@ -35,6 +41,12 @@ private:
 
     /** Pointer to the ring topology tracker (not owned, not serialized) */
     RingTopologyTracker<DIM>* mpRingTopology;
+
+    /** Stiffness scale factor for Transit (TA) cells (multiplier relative to stem baseline) */
+    double mTAStiffnessScale;
+
+    /** Stiffness scale factor for Differentiated cells (multiplier relative to stem baseline) */
+    double mDiffStiffnessScale;
 
     friend class boost::serialization::access;
     template<class Archive>
@@ -48,7 +60,9 @@ public:
 
     RingSpringForce()
         : GeneralisedLinearSpringForce<DIM, DIM>(),
-          mpRingTopology(nullptr)
+          mpRingTopology(nullptr),
+          mTAStiffnessScale(1.0),
+          mDiffStiffnessScale(1.0)
     {
     }
 
@@ -61,6 +75,72 @@ public:
     void SetRingTopologyTracker(RingTopologyTracker<DIM>* pTracker)
     {
         mpRingTopology = pTracker;
+    }
+
+    /**
+     * Set the stiffness scale factor for Transit (TA) cells.
+     * Stem cells are the baseline (scale = 1.0).
+     * @param scale multiplicative factor applied to TA–TA or TA–other interactions
+     */
+    void SetTAStiffnessScale(double scale)
+    {
+        mTAStiffnessScale = scale;
+    }
+
+    /**
+     * Set the stiffness scale factor for Differentiated cells.
+     * Stem cells are the baseline (scale = 1.0).
+     * @param scale multiplicative factor applied to Diff–Diff or Diff–other interactions
+     */
+    void SetDiffStiffnessScale(double scale)
+    {
+        mDiffStiffnessScale = scale;
+    }
+
+    /**
+     * Override to return a per-cell-type stiffness multiplier.
+     *
+     * For each cell in the pair we look up its proliferative type:
+     *   Stem → 1.0,  Transit → mTAStiffnessScale,  Differentiated → mDiffStiffnessScale.
+     *
+     * The pairwise multiplier is the geometric mean: sqrt(scaleA * scaleB).
+     * This gives a symmetric, monotone blend:
+     *   stem–stem  → 1,
+     *   stem–TA    → sqrt(TAscale),
+     *   TA–TA      → TAscale,
+     *   TA–diff    → sqrt(TAscale * Diffscale),
+     *   diff–diff  → Diffscale.
+     */
+    double VariableSpringConstantMultiplicationFactor(
+        unsigned nodeAGlobalIndex,
+        unsigned nodeBGlobalIndex,
+        AbstractCellPopulation<DIM, DIM>& rCellPopulation,
+        bool isCloserThanRestLength) override
+    {
+        // If both scales are 1.0, skip the lookup entirely
+        if (mTAStiffnessScale == 1.0 && mDiffStiffnessScale == 1.0)
+        {
+            return 1.0;
+        }
+
+        auto GetScaleForNode = [&](unsigned nodeIndex) -> double
+        {
+            CellPtr p_cell = rCellPopulation.GetCellUsingLocationIndex(nodeIndex);
+            if (p_cell->GetCellProliferativeType()->template IsType<TransitCellProliferativeType>())
+            {
+                return mTAStiffnessScale;
+            }
+            else if (p_cell->GetCellProliferativeType()->template IsType<DifferentiatedCellProliferativeType>())
+            {
+                return mDiffStiffnessScale;
+            }
+            return 1.0; // Stem or any other type
+        };
+
+        double scale_a = GetScaleForNode(nodeAGlobalIndex);
+        double scale_b = GetScaleForNode(nodeBGlobalIndex);
+
+        return std::sqrt(scale_a * scale_b);
     }
 
     /**
@@ -125,6 +205,12 @@ public:
         *rParamsFile << "\t\t\t<UsingRingTopology>"
                      << (mpRingTopology != nullptr ? "true" : "false")
                      << "</UsingRingTopology>\n";
+        *rParamsFile << "\t\t\t<TAStiffnessScale>"
+                     << mTAStiffnessScale
+                     << "</TAStiffnessScale>\n";
+        *rParamsFile << "\t\t\t<DiffStiffnessScale>"
+                     << mDiffStiffnessScale
+                     << "</DiffStiffnessScale>\n";
         GeneralisedLinearSpringForce<DIM, DIM>::OutputForceParameters(rParamsFile);
     }
 };

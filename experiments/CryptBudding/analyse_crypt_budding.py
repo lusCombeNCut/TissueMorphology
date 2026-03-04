@@ -374,7 +374,7 @@ def compute_sphericity_3d(positions):
 # Analysis
 # =====================================================================
 
-def analyse_model(base_dir, model_type, method='polar', simple_params=None, use_outline=False,
+def analyse_model(base_dir, model_type, method='fourier', simple_params=None, use_outline=False,
                   debug_plots_dir=None):
     """
     Scan output directory for a model and count crypts per (stiffness, run).
@@ -382,10 +382,10 @@ def analyse_model(base_dir, model_type, method='polar', simple_params=None, use_
     Args:
         base_dir: Base output directory
         model_type: Model type (node2d, vertex2d, etc.)
-        method: 'polar' (radial peak detection) or 'simple' (SimpleCryptCount)
+        method: 'polar' (radial peak detection) or 'fourier' (SimpleCryptCount/Fourier descriptors)
         simple_params: Parameters dict for SimpleCryptCount method
         use_outline: If True, use VTP outline files for SimpleCryptCount method (2D only)
-        debug_plots_dir: If provided, save debug plots for run_1 of each stiffness
+        debug_plots_dir: If provided, save debug plots for all runs
     
     Returns: dict { stiffness: [{'num_crypts': int, 'circularity': float,
                                   'sphericity': float}, ...] }
@@ -402,10 +402,10 @@ def analyse_model(base_dir, model_type, method='polar', simple_params=None, use_
     results = defaultdict(list)
     
     # Validate method
-    if method == 'simple' and dim == 3:
+    if method == 'fourier' and dim == 3:
         print(f"  WARNING: SimpleCryptCount method only supports 2D. Falling back to polar.")
         method = 'polar'
-    if method == 'simple' and not HAS_SIMPLE_CRYPT_COUNT:
+    if method == 'fourier' and not HAS_SIMPLE_CRYPT_COUNT:
         print(f"  WARNING: SimpleCryptCount not available. Falling back to polar.")
         method = 'polar'
 
@@ -436,7 +436,7 @@ def analyse_model(base_dir, model_type, method='polar', simple_params=None, use_
             
             for sd in search_dirs:
                 # Try to load outline data (for SimpleCryptCount with --use-outline)
-                if method == 'simple' and use_outline:
+                if method == 'fourier' and use_outline:
                     try:
                         outline_data, cell_types = load_final_outline(sd)
                         break
@@ -444,7 +444,7 @@ def analyse_model(base_dir, model_type, method='polar', simple_params=None, use_
                         pass
                 
                 # Try to load vertex mesh boundary (for vertex2d model)
-                if method == 'simple' and 'vertex' in model_type and dim == 2:
+                if method == 'fourier' and 'vertex' in model_type and dim == 2:
                     try:
                         outline_data, cell_types = load_final_vertex_boundary(sd)
                         break
@@ -463,7 +463,7 @@ def analyse_model(base_dir, model_type, method='polar', simple_params=None, use_
                 continue
 
             if dim == 2:
-                if method == 'simple':
+                if method == 'fourier':
                     # Use SimpleCryptCount method
                     if outline_data is not None:
                         # Use VTP outline or vertex mesh directly
@@ -475,12 +475,12 @@ def analyse_model(base_dir, model_type, method='polar', simple_params=None, use_
                     n_crypts = result.num_crypts
                     circ = result.circularity
                     
-                    # Generate debug plot for run_1 of each stiffness
-                    if debug_plots_dir and run_label == 'run_1' and HAS_MATPLOTLIB:
+                    # Generate debug plot for all runs
+                    if debug_plots_dir and HAS_MATPLOTLIB:
                         os.makedirs(debug_plots_dir, exist_ok=True)
                         debug_path = os.path.join(debug_plots_dir, 
-                                                  f'{model_type}_stiffness_{stiffness}_crypt_outline.png')
-                        title = f'{model_type} - ECM Stiffness = {stiffness}'
+                                                  f'{model_type}_stiffness_{stiffness}_{run_label}_crypt_outline.png')
+                        title = f'{model_type} - ECM Stiffness = {stiffness} - {run_label}'
                         plot_crypt_outline(result, output_path=debug_path, title=title)
                 else:
                     # Use polar radial detection method
@@ -700,9 +700,9 @@ def main():
                         help='Minimum radial prominence for crypt detection (polar method)')
     
     # SimpleCryptCount method options
-    parser.add_argument('--method', type=str, default='polar',
-                        choices=['polar', 'simple'],
-                        help='Crypt counting method: polar (radial peaks) or simple (SimpleCryptCount)')
+    parser.add_argument('--method', type=str, default='fourier',
+                        choices=['polar', 'fourier'],
+                        help='Crypt counting method: polar (radial peaks) or fourier (Fourier descriptors/SimpleCryptCount)')
     parser.add_argument('--use-outline', action='store_true',
                         help='Use VTP outline files for SimpleCryptCount (more accurate for 2D)')
     parser.add_argument('--fourier-harmonics', type=int, default=25,
@@ -714,7 +714,7 @@ def main():
     parser.add_argument('--min-arc-length', type=float, default=0.1466,
                         help='Min normalized arc length (SimpleCryptCount)')
     parser.add_argument('--debug-plots', action='store_true',
-                        help='Save debug plots showing crypt outlines for run_1 of each stiffness')
+                        help='Save debug plots showing crypt outlines for all runs')
 
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -723,7 +723,7 @@ def main():
     simple_params = None
     use_outline = args.use_outline if hasattr(args, 'use_outline') else False
     
-    if args.method == 'simple':
+    if args.method == 'fourier':
         if not HAS_SIMPLE_CRYPT_COUNT:
             print("ERROR: SimpleCryptCount method not available. ")
             print("       Check that simple_crypt_count.py is in the same directory.")
@@ -767,7 +767,7 @@ def main():
         
         # Set up debug plots directory if requested (only for SimpleCryptCount method)
         debug_plots_dir = None
-        if args.debug_plots and args.method == 'simple':
+        if args.debug_plots and args.method == 'fourier':
             debug_plots_dir = os.path.join(args.output_dir, 'debug_plots')
         
         results = analyse_model(args.base_dir, model_type, 
