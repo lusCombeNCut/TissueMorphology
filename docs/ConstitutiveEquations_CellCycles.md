@@ -13,9 +13,10 @@ their mathematical formulations, phase structure, and literature references.
 
 **Used in:** All four model configurations (node2d, vertex2d, node3d, vertex3d)
 
-**Selection:** Controlled by `enableGenerationalCascade` in config:
-- `true` (default) → **UniformContactInhibitionGenerationalCellCycleModel** with Meineke cascade
-- `false` → **UniformContactInhibitionCellCycleModel** (no generation tracking)
+**Selection:** Controlled by config toggles:
+- `enableStochasticFourType = true` → **StochasticFourTypeCellCycleModel** (Montes-Olivas 2023) — **current default**
+- `enableGenerationalCascade = true` → **UniformContactInhibitionGenerationalCellCycleModel** with Meineke cascade — legacy
+- Both false → **UniformContactInhibitionCellCycleModel** (no generation tracking)
 
 A custom cell cycle model that extends Chaste's `ContactInhibitionCellCycleModel` with:
 1. **Stochastic total cycle duration** drawn from a uniform distribution
@@ -120,7 +121,7 @@ will typically divide in 12–14 hours (default parameters).
 | Symbol | Parameter | Default | CryptBudding Config |
 |--------|-----------|---------|---------------------|
 | $V_{\text{eq}}$ | `mEquilibriumVolume` | must be set | 1.0 (node) or target area (vertex) |
-| $f_q$ | `mQuiescentVolumeFraction` | must be set | **0.5** (`quiescentFraction`) |
+| $f_q$ | `mQuiescentVolumeFraction` | must be set | **0.7** (`quiescentFraction`) |
 | $T_M$ | M-phase duration | 1.0 h | 1.0 h (fixed) |
 | $T_S$ | S-phase duration | 5.0 h | **0 h** (collapsed) |
 | $T_{G_2}$ | G2-phase duration | 4.0 h | **0 h** (collapsed) |
@@ -234,6 +235,86 @@ When enabled, stem cell divisions follow the **Meineke generational cascade**:
 - Meineke, F.A., Potten, C.S. & Loeffler, M. (2001). Cell migration and organization
   in the intestinal crypt using a lattice-free model. *Cell Proliferation*, 34(4),
   253–266. doi:[10.1046/j.0960-7722.2001.00216.x](https://doi.org/10.1046/j.0960-7722.2001.00216.x)
+
+---
+
+## Stochastic Four-Type Cell Cycle Model (Montes-Olivas et al. 2023)
+
+**Source:** `projects/TissueMorphology/src/StochasticFourTypeCellCycleModel.hpp` (header-only)
+
+**Enabled by:** `enableStochasticFourType = true` in config (**current default in INI files**)
+
+**Inherits from:** `ContactInhibitionCellCycleModel` — contact inhibition is preserved.
+
+This model replaces the deterministic generational cascade with **stochastic, time-dependent
+cell fate transitions** following the approach of Montes-Olivas et al. (2023). Four distinct
+intestinal cell types are modelled via `AbstractCellMutationState` subclasses.
+
+### Cell Types
+
+| Cell Type | MutationState | ProliferativeType | Proliferates? |
+|-----------|---------------|-------------------|---------------|
+| Stem Cell (SC) | `WildTypeCellMutationState` | `TransitCellProliferativeType` | Yes |
+| Transit-Amplifying (TA) | `TACellMutationState` | `TransitCellProliferativeType` | Yes |
+| Paneth Cell (PC) | `PanethCellMutationState` | `DifferentiatedCellProliferativeType` | No ($T_{G_1} = \infty$) |
+| Enterocyte (EC) | `EnterocyteCellMutationState` | `DifferentiatedCellProliferativeType` | No ($T_{G_1} = \infty$) |
+
+### Division Rules
+
+**Stem cell division** — the daughter cell's fate is drawn from:
+
+$$
+\text{daughter} = \begin{cases}
+\text{SC} & \text{with probability } p_{\text{sc}\to\text{sc}} \\
+\text{PC} & \text{with probability } p_{\text{sc}\to\text{pc}} \\
+\text{TA} & \text{with probability } 1 - p_{\text{sc}\to\text{sc}} - p_{\text{sc}\to\text{pc}}
+\end{cases}
+$$
+
+**Transit-amplifying cell division** — time-dependent probability:
+
+$$
+\text{daughter} = \begin{cases}
+\text{TA} & \text{with probability } p_{\text{ta}\to\text{ta}}^{\text{early}},
+  & t < t_{\text{switch}} \\
+\text{EC} & \text{with probability } 1 - p_{\text{ta}\to\text{ta}}^{\text{early}},
+  & t < t_{\text{switch}} \\
+\text{TA} & \text{with probability } p_{\text{ta}\to\text{ta}}^{\text{late}},
+  & t \ge t_{\text{switch}} \\
+\text{EC} & \text{with probability } 1 - p_{\text{ta}\to\text{ta}}^{\text{late}},
+  & t \ge t_{\text{switch}}
+\end{cases}
+$$
+
+**Paneth cells and Enterocytes** do not divide.
+
+### Parameters
+
+| Symbol | Config Key | Default | Description |
+|--------|------------|---------|-------------|
+| $p_{\text{sc}\to\text{sc}}$ | `probStemToStem` | 0.89 | P(SC daughter = SC) |
+| $p_{\text{sc}\to\text{pc}}$ | `probStemToPaneth` | 0.09 | P(SC daughter = PC) |
+| $p_{\text{ta}\to\text{ta}}^{\text{early}}$ | `probTaToTaEarly` | 0.9 | P(TA daughter = TA) for days 1–4 |
+| $p_{\text{ta}\to\text{ta}}^{\text{late}}$ | `probTaToTaLate` | 0.7 | P(TA daughter = TA) for days 5+ |
+| $t_{\text{switch}}$ | `transitionTime` | 120.0 h | Time at which TA probabilities switch |
+| — | `panethFraction` | 0.09 | Initial fraction of Paneth cells |
+
+### Stochastic Cycle Duration
+
+Same as the base contact inhibition model:
+
+$$
+T_{\text{total}} \sim U(T_{\min}, T_{\max}) \quad \text{(SC and TA)}
+$$
+$$
+T_{\text{total}} = \infty \quad \text{(PC and EC)}
+$$
+
+### References (Stochastic Four-Type Model)
+
+- Montes-Olivas, S., Marucci, L. & Homer, M. (2023). In-silico intestinal
+  crypt–organoid model. *Cell Proliferation*, 56(1), e13370.
+  doi:[10.1111/cpr.13370](https://doi.org/10.1111/cpr.13370)
 
 ---
 

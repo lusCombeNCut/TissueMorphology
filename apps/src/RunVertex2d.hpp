@@ -18,10 +18,14 @@
 
 #include "UniformContactInhibitionCellCycleModel.hpp"
 #include "UniformContactInhibitionGenerationalCellCycleModel.hpp"
+#include "StochasticFourTypeCellCycleModel.hpp"
 #include "TransitCellProliferativeType.hpp"
 #include "StemCellProliferativeType.hpp"
 #include "DifferentiatedCellProliferativeType.hpp"
 #include "WildTypeCellMutationState.hpp"
+#include "TACellMutationState.hpp"
+#include "PanethCellMutationState.hpp"
+#include "EnterocyteCellMutationState.hpp"
 
 #include "FastNagaiHondaForce.hpp"
 #include "LumenPressureForce.hpp"
@@ -32,6 +36,12 @@
 #include "ECMConfinementForce.hpp"
 #include "DynamicECMField.hpp"
 #include "ECMFieldWriter.hpp"
+#include "GhostNodeEcmField.hpp"
+#include "GhostNodeEcmForce.hpp"
+#include "GhostNodeEcmWriter.hpp"
+#include "ViscoelasticGhostNodeEcmField.hpp"
+#include "ViscoelasticGhostNodeEcmForce.hpp"
+#include "ViscoelasticGhostNodeEcmWriter.hpp"
 
 #include "VolumeTrackingModifier.hpp"
 #include "SimpleTargetAreaModifier.hpp"
@@ -40,6 +50,7 @@
 #include "CellVolumesWriter.hpp"
 #include "CellProliferativeTypesCountWriter.hpp"
 #include "CellContactInhibitionStatusWriter.hpp"
+#include "CellLumenForceWriter.hpp"
 
 #include "CryptBuddingParams.hpp"
 #include "CryptBuddingSummaryModifier.hpp"
@@ -75,6 +86,8 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
 
     std::vector<CellPtr> cells;
     MAKE_PTR(WildTypeCellMutationState, p_state);
+    MAKE_PTR(TACellMutationState, p_ta_mut);
+    MAKE_PTR(PanethCellMutationState, p_paneth_mut);
     MAKE_PTR(StemCellProliferativeType, p_stem);
     MAKE_PTR(TransitCellProliferativeType, p_ta);
     MAKE_PTR(DifferentiatedCellProliferativeType, p_diff);
@@ -84,7 +97,23 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
     {
         // Create cell cycle model - generational or simple based on config
         AbstractCellCycleModel* p_cycle_base;
-        if (p.enableGenerationalCascade)
+        if (p.enableStochasticFourType)
+        {
+            auto* p_cycle = new StochasticFourTypeCellCycleModel();
+            p_cycle->SetDimension(2);
+            p_cycle->SetQuiescentVolumeFraction(p.quiescentFraction);
+            p_cycle->SetEquilibriumVolume(target_area);
+            p_cycle->SetTotalCycleMin(p.stemCycleMin);
+            p_cycle->SetTotalCycleMax(p.stemCycleMax);
+            p_cycle->SetTransitCycleRatio(p.taCycleRatio);
+            p_cycle->SetProbStemToStem(p.probStemToStem);
+            p_cycle->SetProbStemToPaneth(p.probStemToPaneth);
+            p_cycle->SetProbTaToTaEarly(p.probTaToTaEarly);
+            p_cycle->SetProbTaToTaLate(p.probTaToTaLate);
+            p_cycle->SetTransitionTime(p.transitionTime);
+            p_cycle_base = p_cycle;
+        }
+        else if (p.enableGenerationalCascade)
         {
             auto* p_cycle = new UniformContactInhibitionGenerationalCellCycleModel();
             p_cycle->SetDimension(2);
@@ -109,11 +138,43 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
         }
 
         CellPtr p_cell(new Cell(p_state, p_cycle_base));
-        AssignCellTypeByFraction(p_cell, 0.0, p_stem, p_ta, p_diff,
-                                 p.stemFraction, p.transitFraction);
+
+        if (p.enableStochasticFourType)
+        {
+            // 4-type model: assign SC, TA, or PC by fraction using MutationState
+            double u_type = p_gen->ranf();
+            if (u_type < p.stemFraction)
+            {
+                p_cell->SetCellProliferativeType(p_ta);  // TransitCellProliferativeType
+                p_cell->SetMutationState(p_state);       // WildType = Stem
+                p_cell->GetCellData()->SetItem("cell_type_id", 0.0);
+            }
+            else if (u_type < p.stemFraction + p.transitFraction)
+            {
+                p_cell->SetCellProliferativeType(p_ta);
+                p_cell->SetMutationState(p_ta_mut);
+                p_cell->GetCellData()->SetItem("cell_type_id", 1.0);
+            }
+            else if (u_type < p.stemFraction + p.transitFraction + p.panethFraction)
+            {
+                p_cell->SetCellProliferativeType(p_diff);
+                p_cell->SetMutationState(p_paneth_mut);
+                p_cell->GetCellData()->SetItem("cell_type_id", 2.0);
+            }
+            else
+            {
+                p_cell->SetCellProliferativeType(p_diff);
+                p_cell->GetCellData()->SetItem("cell_type_id", 2.0);
+            }
+        }
+        else
+        {
+            AssignCellTypeByFraction(p_cell, 0.0, p_stem, p_ta, p_diff,
+                                     p.stemFraction, p.transitFraction);
+        }
 
         // For generational model, set initial generation based on cell type
-        if (p.enableGenerationalCascade)
+        if (p.enableGenerationalCascade && !p.enableStochasticFourType)
         {
             auto* p_gen_cycle = static_cast<UniformContactInhibitionGenerationalCellCycleModel*>(p_cycle_base);
             if (p_cell->GetCellProliferativeType()->IsType<StemCellProliferativeType>())
@@ -181,50 +242,124 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
 
     // ---- ECM field: fiber-based confinement (replaces BasementMembraneForce) ----
     double ecm_half = p.organoidRadius2d * p.ecmMaxRadiusFraction;
-    boost::shared_ptr<DynamicECMField> p_ecm_field(
-        new DynamicECMField("radial", p.ecmGridSpacing,
-                           -ecm_half, ecm_half, -ecm_half, ecm_half,
-                           p.ecmGridType));
-    p_ecm_field->SetDegradationRate(p.ecmDegradationRate);
-    p_ecm_field->SetDiffusionCoeff(p.ecmDiffusionCoeff);
 
-    // Clear ECM density inside the organoid
-    double ecm_clear_radius = p.organoidRadius2d + 0.5 * p.ecmGridSpacing;
-    p_ecm_field->ClearDensityInsideRadius(center2d, ecm_clear_radius);
-
-    if (p.enableEcmConfinement)
+    if (p.enableGhostNodeECM)
     {
-        MAKE_PTR(ECMConfinementForce<2>, p_ecm);
-        p_ecm->SetECMField(p_ecm_field);
-        p_ecm->SetConfinementStiffness(p.ecmConfinementStiffness);
-        p_ecm->SetEcmSpringRestLength(p.ecmSpringRestLength);
-        p_ecm->SetEcmInteractionCutoff(p.ecmInteractionCutoff);
-        p_ecm->SetDegradationEnabled(true);
-        p_ecm->SetRemodelingEnabled(p.enableEcmGuidance);
-        p_ecm->SetTrackCenter(true);
-        simulator.AddForce(p_ecm);
-    }
+        // ── Ghost node ECM (off-lattice particle-based) ──────────
+        double gn_spacing = p.ghostGridSpacing;
+        double gn_rest = (p.ghostSpringRestLength > 0.0) ? p.ghostSpringRestLength : gn_spacing;
 
-    // ECM field VTK writer for ParaView visualization
-    boost::shared_ptr<ECMFieldWriter<2>> p_ecm_writer(
-        new ECMFieldWriter<2>(p_ecm_field, p.samplingMultiple));
-    simulator.AddSimulationModifier(p_ecm_writer);
+        if (p.enableViscoelasticECM)
+        {
+            // ── Viscoelastic constitutive model ──────────────────
+            boost::shared_ptr<ViscoelasticGhostNodeEcmField<2>> p_ve_field(
+                new ViscoelasticGhostNodeEcmField<2>("radial", gn_spacing, -ecm_half, ecm_half, -ecm_half, ecm_half,
+                                     p.ecmGridType));
+            p_ve_field->SetRelaxedStiffness(p.ghostRelaxedStiffness);
+            p_ve_field->SetRelaxationModulus(p.ghostRelaxationModulus);
+            p_ve_field->SetRelaxationTime(p.ghostRelaxationTime);
+            p_ve_field->SetGhostDamping(p.ghostDamping);
+            p_ve_field->SetDegradationRate(p.ecmDegradationRate);
+            p_ve_field->SetRemovalThreshold(p.ghostRemovalThreshold);
+            p_ve_field->SetFibreRemodelingRate(p.ghostFibreRemodelingRate);
+            p_ve_field->SetAnisotropyStrength(p.ghostAnisotropyStrength);
+
+            double ecm_clear_radius = p.organoidRadius2d + 0.5 * gn_spacing;
+            p_ve_field->ClearDensityInsideRadius(center2d, ecm_clear_radius);
+
+            if (p.enableEcmConfinement)
+            {
+                MAKE_PTR(ViscoelasticGhostNodeEcmForce<2>, p_ve_force);
+                p_ve_force->SetGhostField(p_ve_field);
+                p_ve_force->SetCellGhostStiffness(p.ghostCellGhostStiffness);
+                p_ve_force->SetCellGhostRestLength(p.ghostCellGhostRestLength);
+                p_ve_force->SetCellGhostCutoff(p.ghostCellGhostCutoff);
+                p_ve_force->SetDegradationEnabled(true);
+                p_ve_force->SetRemodelingEnabled(p.enableEcmGuidance);
+                p_ve_force->SetTrackCenter(true);
+                p_ve_force->SetRemovalCheckInterval(p.ghostRemovalCheckInterval);
+                simulator.AddForce(p_ve_force);
+            }
+
+            boost::shared_ptr<ViscoelasticGhostNodeEcmWriter<2>> p_ve_writer(
+                new ViscoelasticGhostNodeEcmWriter<2>(p_ve_field, p.samplingMultiple));
+            simulator.AddSimulationModifier(p_ve_writer);
+        }
+        else
+        {
+            // ── Original elastic ghost node ECM ──────────────────
+            boost::shared_ptr<GhostNodeEcmField<2>> p_ghost_field(
+                new GhostNodeEcmField<2>("radial", gn_spacing, -ecm_half, ecm_half, -ecm_half, ecm_half,
+                                     p.ecmGridType));
+            p_ghost_field->SetGhostGhostStiffness(p.ghostGhostStiffness);
+            p_ghost_field->SetGhostDamping(p.ghostDamping);
+            p_ghost_field->SetDegradationRate(p.ecmDegradationRate);
+            p_ghost_field->SetRemovalThreshold(p.ghostRemovalThreshold);
+            p_ghost_field->SetFibreRemodelingRate(p.ghostFibreRemodelingRate);
+            p_ghost_field->SetAnisotropyStrength(p.ghostAnisotropyStrength);
+            p_ghost_field->SetGhostRestLength(gn_rest);
+
+            double ecm_clear_radius = p.organoidRadius2d + 0.5 * gn_spacing;
+            p_ghost_field->ClearDensityInsideRadius(center2d, ecm_clear_radius);
+
+            if (p.enableEcmConfinement)
+            {
+                MAKE_PTR(GhostNodeEcmForce<2>, p_gn_force);
+                p_gn_force->SetGhostField(p_ghost_field);
+                p_gn_force->SetCellGhostStiffness(p.ghostCellGhostStiffness);
+                p_gn_force->SetCellGhostRestLength(p.ghostCellGhostRestLength);
+                p_gn_force->SetCellGhostCutoff(p.ghostCellGhostCutoff);
+                p_gn_force->SetDegradationEnabled(true);
+                p_gn_force->SetRemodelingEnabled(p.enableEcmGuidance);
+                p_gn_force->SetTrackCenter(true);
+                p_gn_force->SetRemovalCheckInterval(p.ghostRemovalCheckInterval);
+                simulator.AddForce(p_gn_force);
+            }
+
+            boost::shared_ptr<GhostNodeEcmWriter<2>> p_gn_writer(
+                new GhostNodeEcmWriter<2>(p_ghost_field, p.samplingMultiple));
+            simulator.AddSimulationModifier(p_gn_writer);
+        }
+    }
+    else
+    {
+        // ── Grid-based ECM (original) ────────────────────────────
+        boost::shared_ptr<DynamicECMField> p_ecm_field(
+            new DynamicECMField("radial", p.ecmGridSpacing,
+                               -ecm_half, ecm_half, -ecm_half, ecm_half,
+                               p.ecmGridType));
+        p_ecm_field->SetDegradationRate(p.ecmDegradationRate);
+        p_ecm_field->SetDiffusionCoeff(p.ecmDiffusionCoeff);
+
+        double ecm_clear_radius = p.organoidRadius2d + 0.5 * p.ecmGridSpacing;
+        p_ecm_field->ClearDensityInsideRadius(center2d, ecm_clear_radius);
+
+        if (p.enableEcmConfinement)
+        {
+            MAKE_PTR(ECMConfinementForce<2>, p_ecm);
+            p_ecm->SetECMField(p_ecm_field);
+            p_ecm->SetConfinementStiffness(p.ecmConfinementStiffness);
+            p_ecm->SetEcmSpringRestLength(p.ecmSpringRestLength);
+            p_ecm->SetEcmInteractionCutoff(p.ecmInteractionCutoff);
+            p_ecm->SetDegradationEnabled(true);
+            p_ecm->SetRemodelingEnabled(p.enableEcmGuidance);
+            p_ecm->SetTrackCenter(true);
+            simulator.AddForce(p_ecm);
+        }
+
+        boost::shared_ptr<ECMFieldWriter<2>> p_ecm_writer(
+            new ECMFieldWriter<2>(p_ecm_field, p.samplingMultiple));
+        simulator.AddSimulationModifier(p_ecm_writer);
+    }
 
     if (p.enableLumenPressure)
     {
         MAKE_PTR(LumenPressureForce<2>, p_lumen);
         p_lumen->SetPressure(p.lumenPressure);
         p_lumen->SetTrackCenter(true);
-        
-        // Configure target volume (incompressible fluid) mode if enabled
-        if (p.lumenUseTargetVolume)
-        {
-            p_lumen->SetUseTargetVolume(true);
-            p_lumen->SetVolumeGrowthRate(p.lumenVolumeGrowthRate);
-            p_lumen->SetBulkModulus(p.lumenBulkModulus);
-        }
-        
+        p_lumen->SetWriteForce(true);
         simulator.AddForce(p_lumen);
+        population.AddCellWriter<CellLumenForceWriter>();
     }
 
     if (p.enableApicalConstriction)

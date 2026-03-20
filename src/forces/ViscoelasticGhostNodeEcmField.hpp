@@ -1,0 +1,958 @@
+/*
+ * ViscoelasticGhostNodeEcmField.hpp
+ *
+ * Off-lattice agent-based ECM field with true viscoelastic constitutive law.
+ * Templated on spatial dimension (DIM = 2 or 3).
+ *
+ * Each ghost node carries density, fibre orientation, and spring connectivity.
+ * Ghost–ghost springs use a generalized Maxwell model (single-term Prony series)
+ * with per-pair evolving rest lengths, giving genuine stress relaxation:
+ *
+ *   E(t) = E_0 + E_1 * exp(-t/tau)
+ *
+ * Discrete spring analogue:
+ *   Instantaneous force:  F_ij = k_u * (d_ij - s_ij) * A_ij * d_hat_ij
+ *   Rest length evolution: ds_ij/dt = (d_ij - s_ij) / tau
+ *
+ * where k_u = E_0 + E_1 (unrelaxed/instantaneous stiffness)
+ * and s_ij relaxes toward d_ij on timescale tau, so that the long-time
+ * effective stiffness is E_0 (the relaxed modulus).
+ *
+ * Based on the constitutive framework of:
+ *   Fertala et al. (2025) doi:10.1101/2025.07.02.662292
+ *   "Scale-Specific Viscoelastic Characterization of Hydrogels"
+ *
+ * Parameter values calibrated for cell-diameter length scale (~10-20 um)
+ * using microgel AFM stress relaxation data from the above reference.
+ */
+#ifndef VISCOELASTICGHOSTNODEECMFIELD_HPP_
+#define VISCOELASTICGHOSTNODEECMFIELD_HPP_
+
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include <cassert>
+#include <set>
+#include <map>
+#include <fstream>
+#include <sstream>
+#include <iostream>
+#include "UblasVectorInclude.hpp"
+#include "RandomNumberGenerator.hpp"
+#include "OutputFileHandler.hpp"
+
+/**
+ * A single ghost node representing a discrete ECM element with
+ * viscoelastic per-pair rest length storage.
+ */
+template<unsigned DIM>
+struct ViscoelasticGhostNode
+{
+    unsigned id;                              ///< Unique identifier
+    c_vector<double, DIM> position;           ///< Current position (movable)
+    c_vector<double, DIM> force;              ///< Accumulated force for this timestep
+    double density;                           ///< ECM density in [0,1]
+    c_vector<double, DIM> fibre_direction;    ///< Fibre orientation (unit vector)
+    double anisotropy;                        ///< Degree of fibre alignment in [0,1]
+    bool is_active;                           ///< False if removed (density below threshold)
+    std::vector<unsigned> neighbours;         ///< Indices of connected ghost node neighbours
+    std::vector<double> rest_lengths;         ///< Per-pair rest lengths (parallel to neighbours)
+};
+
+/**
+ * Off-lattice ECM field with viscoelastic Maxwell-type constitutive law.
+ *
+ * The key difference from GhostNodeEcmField is that each ghost–ghost
+ * spring pair (i,j) maintains its own evolving rest length s_ij(t).
+ * This rest length relaxes toward the current pair distance on timescale tau:
+ *
+ *   ds_ij/dt = (d_ij - s_ij) / tau
+ *
+ * Combined with the spring force F = k_u * (d_ij - s_ij), this gives
+ * a standard linear solid (SLS) / generalized Maxwell response:
+ *   - Instantaneous stiffness: k_u = E_0 + E_1
+ *   - Long-time stiffness:     k_inf = E_0
+ *   - Relaxation time:         tau = eta_VE / E_1
+ */
+template<unsigned DIM>
+class ViscoelasticGhostNodeEcmField
+{
+private:
+
+    /** All ghost nodes (indexed by id) */
+    std::vector<ViscoelasticGhostNode<DIM>> mNodes;
+
+    /** Number of active (non-removed) nodes */
+    unsigned mNumActive;
+
+    // ── Viscoelastic constitutive parameters ──────────────────
+
+    /** Relaxed (long-time, equilibrium) modulus E_0 [Pa in Chaste force units] */
+    double mRelaxedStiffness;    // E_0
+
+    /** Relaxation modulus E_1: viscous contribution that decays [Pa] */
+    double mRelaxationModulus;   // E_1
+
+    /** Viscoelastic relaxation time tau = eta_VE / E_1 [time units] */
+    double mRelaxationTime;      // tau
+
+    // ── Equation-of-motion drag (NOT a constitutive parameter) ──
+
+    /** Drag coefficient for overdamped position update */
+    double mGhostDamping;
+
+    // ── ECM biology parameters ────────────────────────────────
+
+    /** ECM degradation rate per cell per unit time */
+    double mDegradationRate;
+
+    /** Density threshold below which ghost nodes are removed */
+    double mRemovalThreshold;
+
+    /** Fibre remodeling rate (how quickly fibres align with traction) */
+    double mFibreRemodelingRate;
+
+    /** Anisotropy strength: controls fibre-direction bias on forces */
+    double mAnisotropyStrength;
+
+    /** Grid spacing used during initialization */
+    double mInitialSpacing;
+
+    // ── Spatial hash for neighbour queries ─────────────────────
+
+    double mSpatialHashCellSize;
+    int mHashN[3];
+    double mHashMin[3];
+    std::vector<std::vector<unsigned>> mSpatialHash;
+
+    inline int GetHashIndex(int cx, int cy, int cz = 0) const
+    {
+        if (DIM == 2)
+            return cx * mHashN[1] + cy;
+        else
+            return (cx * mHashN[1] + cy) * mHashN[2] + cz;
+    }
+
+    inline int GetTotalBuckets() const
+    {
+        if (DIM == 2) return mHashN[0] * mHashN[1];
+        else return mHashN[0] * mHashN[1] * mHashN[2];
+    }
+
+public:
+
+    /**
+     * Construct a 2D viscoelastic ghost node ECM field.
+     */
+    ViscoelasticGhostNodeEcmField(const std::string& fibrePattern,
+                                  double spacing,
+                                  double xMin, double xMax,
+                                  double yMin, double yMax,
+                                  const std::string& gridType = "square")
+        : mNumActive(0),
+          mRelaxedStiffness(5.0),
+          mRelaxationModulus(1.0),
+          mRelaxationTime(1.0),
+          mGhostDamping(1.0),
+          mDegradationRate(0.02),
+          mRemovalThreshold(0.01),
+          mFibreRemodelingRate(0.1),
+          mAnisotropyStrength(0.5),
+          mInitialSpacing(spacing),
+          mSpatialHashCellSize(spacing * 2.0)
+    {
+        mHashN[0] = static_cast<int>(std::ceil((xMax - xMin) / mSpatialHashCellSize)) + 1;
+        mHashN[1] = static_cast<int>(std::ceil((yMax - yMin) / mSpatialHashCellSize)) + 1;
+        mHashN[2] = 1;
+        mHashMin[0] = xMin;
+        mHashMin[1] = yMin;
+        mHashMin[2] = 0.0;
+        mSpatialHash.resize(GetTotalBuckets());
+
+        if (gridType == "hex")
+            GenerateHexGrid(spacing, xMin, xMax, yMin, yMax);
+        else
+            GenerateSquareGrid(spacing, xMin, xMax, yMin, yMax);
+
+        InitialiseFibres(fibrePattern);
+        RebuildSpatialHash();
+        double neighbour_cutoff = spacing * 1.6;
+        BuildNeighbourConnectivity(neighbour_cutoff);
+
+        std::cout << "ViscoelasticGhostNodeEcmField<" << DIM << ">: created "
+                  << mNodes.size() << " ghost nodes (" << gridType
+                  << " grid, spacing=" << spacing << ")" << std::endl;
+    }
+
+    /**
+     * Construct a 3D viscoelastic ghost node ECM field.
+     */
+    ViscoelasticGhostNodeEcmField(const std::string& fibrePattern,
+                                  double spacing,
+                                  double xMin, double xMax,
+                                  double yMin, double yMax,
+                                  double zMin, double zMax,
+                                  const std::string& gridType = "cubic")
+        : mNumActive(0),
+          mRelaxedStiffness(5.0),
+          mRelaxationModulus(1.0),
+          mRelaxationTime(1.0),
+          mGhostDamping(1.0),
+          mDegradationRate(0.02),
+          mRemovalThreshold(0.01),
+          mFibreRemodelingRate(0.1),
+          mAnisotropyStrength(0.5),
+          mInitialSpacing(spacing),
+          mSpatialHashCellSize(spacing * 2.0)
+    {
+        mHashN[0] = static_cast<int>(std::ceil((xMax - xMin) / mSpatialHashCellSize)) + 1;
+        mHashN[1] = static_cast<int>(std::ceil((yMax - yMin) / mSpatialHashCellSize)) + 1;
+        mHashN[2] = static_cast<int>(std::ceil((zMax - zMin) / mSpatialHashCellSize)) + 1;
+        mHashMin[0] = xMin;
+        mHashMin[1] = yMin;
+        mHashMin[2] = zMin;
+        mSpatialHash.resize(GetTotalBuckets());
+
+        GenerateCubicGrid(spacing, xMin, xMax, yMin, yMax, zMin, zMax);
+
+        InitialiseFibres(fibrePattern);
+        RebuildSpatialHash();
+        double neighbour_cutoff = spacing * 1.6;
+        BuildNeighbourConnectivity(neighbour_cutoff);
+
+        std::cout << "ViscoelasticGhostNodeEcmField<" << DIM << ">: created "
+                  << mNodes.size() << " ghost nodes (" << gridType
+                  << " grid, spacing=" << spacing << ")" << std::endl;
+    }
+
+    // ── Accessors ────────────────────────────────────────────
+
+    unsigned GetNumNodes() const { return mNodes.size(); }
+    unsigned GetNumActive() const { return mNumActive; }
+
+    const ViscoelasticGhostNode<DIM>& GetNode(unsigned i) const { return mNodes[i]; }
+    ViscoelasticGhostNode<DIM>& rGetNode(unsigned i) { return mNodes[i]; }
+
+    const std::vector<ViscoelasticGhostNode<DIM>>& GetNodes() const { return mNodes; }
+
+    // ── Force accumulation ────────────────────────────────────
+
+    void ClearGhostForces()
+    {
+        for (auto& node : mNodes)
+        {
+            if (node.is_active)
+                node.force = zero_vector<double>(DIM);
+        }
+    }
+
+    void AddForceToGhostNode(unsigned index, const c_vector<double, DIM>& force)
+    {
+        mNodes[index].force += force;
+    }
+
+    // ── Viscoelastic parameter setters ────────────────────────
+
+    /** Set the relaxed (equilibrium) stiffness E_0 */
+    void SetRelaxedStiffness(double E0) { mRelaxedStiffness = E0; }
+    double GetRelaxedStiffness() const { return mRelaxedStiffness; }
+
+    /** Set the relaxation modulus E_1 (viscous contribution) */
+    void SetRelaxationModulus(double E1) { mRelaxationModulus = E1; }
+    double GetRelaxationModulus() const { return mRelaxationModulus; }
+
+    /** Set the viscoelastic relaxation time tau */
+    void SetRelaxationTime(double tau) { mRelaxationTime = tau; }
+    double GetRelaxationTime() const { return mRelaxationTime; }
+
+    /** Get the instantaneous (unrelaxed) stiffness E_u = E_0 + E_1 */
+    double GetInstantaneousStiffness() const { return mRelaxedStiffness + mRelaxationModulus; }
+
+    // ── EoM drag setter (distinct from constitutive parameters) ──
+
+    void SetGhostDamping(double eta) { mGhostDamping = eta; }
+    double GetGhostDamping() const { return mGhostDamping; }
+
+    // ── Biology parameter setters ─────────────────────────────
+
+    void SetDegradationRate(double rate) { mDegradationRate = rate; }
+    double GetDegradationRate() const { return mDegradationRate; }
+
+    void SetRemovalThreshold(double thresh) { mRemovalThreshold = thresh; }
+    double GetRemovalThreshold() const { return mRemovalThreshold; }
+
+    void SetFibreRemodelingRate(double rate) { mFibreRemodelingRate = rate; }
+    void SetAnisotropyStrength(double a) { mAnisotropyStrength = a; }
+
+    // ── Core methods ─────────────────────────────────────────
+
+    void ClearDensityInsideRadius(c_vector<double, DIM> center, double radius)
+    {
+        for (auto& node : mNodes)
+        {
+            double dist = norm_2(node.position - center);
+            if (dist < radius)
+            {
+                node.density = 0.0;
+                node.is_active = false;
+            }
+        }
+        UpdateActiveCount();
+        RebuildSpatialHash();
+    }
+
+    void GetNearbyGhostNodes(const c_vector<double, DIM>& pos,
+                             double cutoff,
+                             std::vector<unsigned>& rIndices) const
+    {
+        rIndices.clear();
+        double cutoff_sq = cutoff * cutoff;
+
+        int cx = static_cast<int>((pos[0] - mHashMin[0]) / mSpatialHashCellSize);
+        int cy = static_cast<int>((pos[1] - mHashMin[1]) / mSpatialHashCellSize);
+        int range = static_cast<int>(std::ceil(cutoff / mSpatialHashCellSize));
+
+        if (DIM == 2)
+        {
+            for (int ix = cx - range; ix <= cx + range; ix++)
+            {
+                for (int iy = cy - range; iy <= cy + range; iy++)
+                {
+                    if (ix < 0 || ix >= mHashN[0] || iy < 0 || iy >= mHashN[1]) continue;
+                    const auto& bucket = mSpatialHash[GetHashIndex(ix, iy)];
+                    for (unsigned idx : bucket)
+                    {
+                        c_vector<double, DIM> disp = mNodes[idx].position - pos;
+                        double dist_sq = inner_prod(disp, disp);
+                        if (dist_sq < cutoff_sq && dist_sq > 1e-20)
+                        {
+                            rIndices.push_back(idx);
+                        }
+                    }
+                }
+            }
+        }
+        else // DIM == 3
+        {
+            int cz = static_cast<int>((pos[2] - mHashMin[2]) / mSpatialHashCellSize);
+            for (int ix = cx - range; ix <= cx + range; ix++)
+            {
+                for (int iy = cy - range; iy <= cy + range; iy++)
+                {
+                    for (int iz = cz - range; iz <= cz + range; iz++)
+                    {
+                        if (ix < 0 || ix >= mHashN[0] || iy < 0 || iy >= mHashN[1] ||
+                            iz < 0 || iz >= mHashN[2]) continue;
+                        const auto& bucket = mSpatialHash[GetHashIndex(ix, iy, iz)];
+                        for (unsigned idx : bucket)
+                        {
+                            c_vector<double, DIM> disp = mNodes[idx].position - pos;
+                            double dist_sq = inner_prod(disp, disp);
+                            if (dist_sq < cutoff_sq && dist_sq > 1e-20)
+                            {
+                                rIndices.push_back(idx);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Compute ghost–ghost viscoelastic spring forces, evolve rest lengths,
+     * and update positions.
+     *
+     * This is the core viscoelastic update. For each connected pair (i,j):
+     *
+     *   1. Compute current distance d_ij
+     *   2. Compute spring force:  F = k_u * (d_ij - s_ij) * A_ij * d_hat_ij
+     *      where k_u = E_0 + E_1 is the instantaneous stiffness
+     *   3. Evolve rest length:    s_ij += (d_ij - s_ij) * dt / tau
+     *      This is the Maxwell dashpot element: the rest length relaxes
+     *      toward the current length, causing stress relaxation.
+     *   4. Update position (overdamped EoM): x += F/eta_drag * dt
+     *
+     * The result is a Standard Linear Solid (SLS) response:
+     *   - Short times (t << tau): full instantaneous stiffness k_u
+     *   - Long times  (t >> tau): rest length catches up, effective stiffness -> E_0
+     */
+    void UpdateGhostNodePositions(double dt)
+    {
+        double k_u = mRelaxedStiffness + mRelaxationModulus;  // instantaneous stiffness
+        double inv_tau = 1.0 / mRelaxationTime;
+
+        // Accumulate ghost-ghost viscoelastic spring forces (Newton's 3rd law)
+        for (unsigned i = 0; i < mNodes.size(); i++)
+        {
+            ViscoelasticGhostNode<DIM>& node_i = mNodes[i];
+            if (!node_i.is_active) continue;
+
+            for (unsigned nb = 0; nb < node_i.neighbours.size(); nb++)
+            {
+                unsigned j = node_i.neighbours[nb];
+                if (j <= i) continue;  // each pair processed once
+
+                ViscoelasticGhostNode<DIM>& node_j = mNodes[j];
+                if (!node_j.is_active) continue;
+
+                c_vector<double, DIM> disp = node_j.position - node_i.position;
+                double dist = norm_2(disp);
+                if (dist < 1e-10) continue;
+
+                c_vector<double, DIM> unit_disp = disp / dist;
+
+                // Per-pair rest length
+                double s_ij = node_i.rest_lengths[nb];
+
+                // Find the reciprocal index (j's entry pointing to i)
+                // to keep rest lengths symmetric
+                unsigned nb_recip = FindReciprocalIndex(j, i);
+
+                // Spring force: F = k_u * (d - s_ij)
+                // Uses linear spring (no log/exp regime) for clean
+                // viscoelastic interpretation of constitutive parameters
+                double extension = dist - s_ij;
+                double force_mag = k_u * extension;
+
+                // Anisotropic modulation
+                double aniso_factor = 1.0;
+                if (mAnisotropyStrength > 0.0)
+                {
+                    double avg_aniso = 0.5 * (node_i.anisotropy + node_j.anisotropy);
+                    if (avg_aniso > 0.0)
+                    {
+                        c_vector<double, DIM> avg_fibre = node_i.fibre_direction + node_j.fibre_direction;
+                        double fn = norm_2(avg_fibre);
+                        if (fn > 1e-10)
+                        {
+                            avg_fibre /= fn;
+                            double cos_angle = std::abs(inner_prod(unit_disp, avg_fibre));
+                            aniso_factor = 1.0 - mAnisotropyStrength * avg_aniso
+                                           * (1.0 - cos_angle);
+                        }
+                    }
+                }
+
+                force_mag *= aniso_factor;
+
+                c_vector<double, DIM> force_ij = force_mag * unit_disp;
+                node_i.force += force_ij;
+                node_j.force -= force_ij;
+
+                // ── Evolve rest length (Maxwell dashpot) ──────────
+                // ds/dt = (d - s) / tau
+                // Forward Euler: s_new = s + (d - s) * dt / tau
+                double ds = extension * dt * inv_tau;
+                double new_s = s_ij + ds;
+
+                // Clamp rest length to prevent negative or excessively large values
+                double min_rest = mInitialSpacing * 0.1;
+                double max_rest = mInitialSpacing * 5.0;
+                new_s = std::max(min_rest, std::min(max_rest, new_s));
+
+                node_i.rest_lengths[nb] = new_s;
+                node_j.rest_lengths[nb_recip] = new_s;
+            }
+        }
+
+        // Update positions (overdamped EoM — separate from constitutive law)
+        double inv_damping = 1.0 / mGhostDamping;
+        double scale = inv_damping * dt;
+        for (auto& node : mNodes)
+        {
+            if (!node.is_active) continue;
+            node.position += node.force * scale;
+        }
+
+        RebuildSpatialHash();
+    }
+
+    /**
+     * Degrade ECM using pre-computed nearby ghost node indices.
+     */
+    void DegradeNearby(const c_vector<double, DIM>& cellPos,
+                       const std::vector<unsigned>& nearbyIndices,
+                       double cutoff, double dt)
+    {
+        double inv_cutoff = 1.0 / cutoff;
+        for (unsigned idx : nearbyIndices)
+        {
+            ViscoelasticGhostNode<DIM>& gn = mNodes[idx];
+            double dist = norm_2(gn.position - cellPos);
+            double weight = std::max(0.0, 1.0 - dist * inv_cutoff);
+            gn.density = std::max(0.0, gn.density - mDegradationRate * weight * dt);
+        }
+    }
+
+    /**
+     * Remove ghost nodes whose density has fallen below the removal threshold.
+     */
+    unsigned RemoveDepletedNodes()
+    {
+        unsigned removed_count = 0;
+
+        for (unsigned i = 0; i < mNodes.size(); i++)
+        {
+            ViscoelasticGhostNode<DIM>& node = mNodes[i];
+            if (!node.is_active) continue;
+
+            if (node.density < mRemovalThreshold)
+            {
+                node.is_active = false;
+                node.density = 0.0;
+                removed_count++;
+
+                // Remove i from all its neighbours' lists (and rest length arrays)
+                for (unsigned nb = 0; nb < node.neighbours.size(); nb++)
+                {
+                    unsigned n_idx = node.neighbours[nb];
+                    auto& n_list = mNodes[n_idx].neighbours;
+                    auto& r_list = mNodes[n_idx].rest_lengths;
+                    for (unsigned k = 0; k < n_list.size(); k++)
+                    {
+                        if (n_list[k] == i)
+                        {
+                            n_list.erase(n_list.begin() + k);
+                            r_list.erase(r_list.begin() + k);
+                            break;
+                        }
+                    }
+                }
+                node.neighbours.clear();
+                node.rest_lengths.clear();
+            }
+        }
+
+        if (removed_count > 0)
+        {
+            UpdateActiveCount();
+            RebuildSpatialHash();
+        }
+
+        return removed_count;
+    }
+
+    /**
+     * Remodel fibre orientation using pre-computed nearby ghost node indices.
+     */
+    void RemodelNearby(const c_vector<double, DIM>& cellPos,
+                       const std::vector<unsigned>& nearbyIndices,
+                       const c_vector<double, DIM>& traction,
+                       double cutoff, double dt)
+    {
+        double inv_cutoff = 1.0 / cutoff;
+        for (unsigned idx : nearbyIndices)
+        {
+            ViscoelasticGhostNode<DIM>& gn = mNodes[idx];
+            double dist = norm_2(gn.position - cellPos);
+            double weight = std::max(0.0, 1.0 - dist * inv_cutoff);
+
+            c_vector<double, DIM> target = traction;
+            if (inner_prod(gn.fibre_direction, target) < 0)
+                target = -target;
+
+            double blend = mFibreRemodelingRate * weight * dt;
+            gn.fibre_direction += blend * (target - gn.fibre_direction);
+            double fn = norm_2(gn.fibre_direction);
+            if (fn > 1e-10)
+                gn.fibre_direction /= fn;
+
+            gn.anisotropy = std::min(1.0, gn.anisotropy + blend);
+        }
+    }
+
+    /**
+     * Write ghost node field to VTP file for ParaView,
+     * including per-node average rest length strain for visualisation.
+     */
+    void WriteOutput(const std::string& filePath, double time) const
+    {
+        std::ofstream file(filePath);
+        if (!file.is_open()) return;
+
+        unsigned num_active = 0;
+        for (const auto& n : mNodes) if (n.is_active) num_active++;
+
+        unsigned num_edges = 0;
+        for (unsigned i = 0; i < mNodes.size(); i++)
+        {
+            if (!mNodes[i].is_active) continue;
+            for (unsigned nb = 0; nb < mNodes[i].neighbours.size(); nb++)
+            {
+                unsigned j = mNodes[i].neighbours[nb];
+                if (j > i && mNodes[j].is_active) num_edges++;
+            }
+        }
+
+        std::map<unsigned, unsigned> index_map;
+        unsigned contiguous = 0;
+        for (unsigned i = 0; i < mNodes.size(); i++)
+        {
+            if (mNodes[i].is_active)
+                index_map[i] = contiguous++;
+        }
+
+        file << "<?xml version=\"1.0\"?>\n";
+        file << "<VTKFile type=\"PolyData\" version=\"0.1\">\n";
+        file << "<PolyData>\n";
+        file << "<Piece NumberOfPoints=\"" << num_active
+             << "\" NumberOfVerts=\"0\" NumberOfLines=\"" << num_edges
+             << "\" NumberOfStrips=\"0\" NumberOfPolys=\"0\">\n";
+
+        // Points
+        file << "<Points>\n";
+        file << "<DataArray type=\"Float64\" NumberOfComponents=\"3\" format=\"ascii\">\n";
+        for (const auto& n : mNodes)
+        {
+            if (!n.is_active) continue;
+            for (unsigned d = 0; d < DIM; d++)
+                file << n.position[d] << " ";
+            for (unsigned d = DIM; d < 3; d++)
+                file << "0 ";
+            file << "\n";
+        }
+        file << "</DataArray>\n</Points>\n";
+
+        // Lines (ECM-ECM bonds)
+        file << "<Lines>\n";
+        file << "<DataArray type=\"Int32\" Name=\"connectivity\" format=\"ascii\">\n";
+        for (unsigned i = 0; i < mNodes.size(); i++)
+        {
+            if (!mNodes[i].is_active) continue;
+            for (unsigned nb = 0; nb < mNodes[i].neighbours.size(); nb++)
+            {
+                unsigned j = mNodes[i].neighbours[nb];
+                if (j > i && mNodes[j].is_active)
+                    file << index_map[i] << " " << index_map[j] << "\n";
+            }
+        }
+        file << "</DataArray>\n";
+        file << "<DataArray type=\"Int32\" Name=\"offsets\" format=\"ascii\">\n";
+        unsigned offset = 0;
+        for (unsigned i = 0; i < mNodes.size(); i++)
+        {
+            if (!mNodes[i].is_active) continue;
+            for (unsigned nb = 0; nb < mNodes[i].neighbours.size(); nb++)
+            {
+                unsigned j = mNodes[i].neighbours[nb];
+                if (j > i && mNodes[j].is_active)
+                {
+                    offset += 2;
+                    file << offset << "\n";
+                }
+            }
+        }
+        file << "</DataArray>\n</Lines>\n";
+
+        // Point data
+        file << "<PointData>\n";
+
+        // Density
+        file << "<DataArray type=\"Float64\" Name=\"density\" format=\"ascii\">\n";
+        for (const auto& n : mNodes) if (n.is_active) file << n.density << "\n";
+        file << "</DataArray>\n";
+
+        // Fibre direction
+        file << "<DataArray type=\"Float64\" Name=\"fibre_direction\" NumberOfComponents=\"3\" format=\"ascii\">\n";
+        for (const auto& n : mNodes)
+        {
+            if (!n.is_active) continue;
+            for (unsigned d = 0; d < DIM; d++)
+                file << n.fibre_direction[d] << " ";
+            for (unsigned d = DIM; d < 3; d++)
+                file << "0 ";
+            file << "\n";
+        }
+        file << "</DataArray>\n";
+
+        // Anisotropy
+        file << "<DataArray type=\"Float64\" Name=\"anisotropy\" format=\"ascii\">\n";
+        for (const auto& n : mNodes) if (n.is_active) file << n.anisotropy << "\n";
+        file << "</DataArray>\n";
+
+        // Average rest length strain: mean of (s_ij - s_initial) / s_initial
+        // Positive = rest length has grown (material has "relaxed" / yielded)
+        // Negative = rest length has shrunk
+        file << "<DataArray type=\"Float64\" Name=\"rest_length_strain\" format=\"ascii\">\n";
+        for (const auto& n : mNodes)
+        {
+            if (!n.is_active) continue;
+            double avg_strain = 0.0;
+            if (!n.rest_lengths.empty())
+            {
+                for (double s : n.rest_lengths)
+                    avg_strain += (s - mInitialSpacing) / mInitialSpacing;
+                avg_strain /= static_cast<double>(n.rest_lengths.size());
+            }
+            file << avg_strain << "\n";
+        }
+        file << "</DataArray>\n";
+
+        // Node ID
+        file << "<DataArray type=\"Int32\" Name=\"id\" format=\"ascii\">\n";
+        for (const auto& n : mNodes) if (n.is_active) file << n.id << "\n";
+        file << "</DataArray>\n";
+
+        file << "</PointData>\n";
+
+        file << "</Piece>\n</PolyData>\n</VTKFile>\n";
+        file.close();
+    }
+
+private:
+
+    void GenerateSquareGrid(double spacing, double xMin, double xMax,
+                            double yMin, double yMax)
+    {
+        unsigned id = 0;
+        for (double y = yMin; y <= yMax; y += spacing)
+        {
+            for (double x = xMin; x <= xMax; x += spacing)
+            {
+                ViscoelasticGhostNode<DIM> gn;
+                gn.id = id++;
+                gn.position = zero_vector<double>(DIM);
+                gn.position[0] = x;
+                gn.position[1] = y;
+                gn.force = zero_vector<double>(DIM);
+                gn.density = 1.0;
+                gn.fibre_direction = zero_vector<double>(DIM);
+                gn.fibre_direction[0] = 1.0;
+                gn.anisotropy = 0.0;
+                gn.is_active = true;
+                mNodes.push_back(gn);
+            }
+        }
+        mNumActive = mNodes.size();
+    }
+
+    void GenerateHexGrid(double spacing, double xMin, double xMax,
+                         double yMin, double yMax)
+    {
+        double row_spacing = spacing * std::sqrt(3.0) / 2.0;
+        unsigned id = 0;
+        int row = 0;
+        for (double y = yMin; y <= yMax; y += row_spacing)
+        {
+            double x_offset = (row % 2 == 1) ? spacing * 0.5 : 0.0;
+            for (double x = xMin + x_offset; x <= xMax; x += spacing)
+            {
+                ViscoelasticGhostNode<DIM> gn;
+                gn.id = id++;
+                gn.position = zero_vector<double>(DIM);
+                gn.position[0] = x;
+                gn.position[1] = y;
+                gn.force = zero_vector<double>(DIM);
+                gn.density = 1.0;
+                gn.fibre_direction = zero_vector<double>(DIM);
+                gn.fibre_direction[0] = 1.0;
+                gn.anisotropy = 0.0;
+                gn.is_active = true;
+                mNodes.push_back(gn);
+            }
+            row++;
+        }
+        mNumActive = mNodes.size();
+    }
+
+    void GenerateCubicGrid(double spacing,
+                           double xMin, double xMax,
+                           double yMin, double yMax,
+                           double zMin, double zMax)
+    {
+        unsigned id = 0;
+        for (double z = zMin; z <= zMax; z += spacing)
+        {
+            for (double y = yMin; y <= yMax; y += spacing)
+            {
+                for (double x = xMin; x <= xMax; x += spacing)
+                {
+                    ViscoelasticGhostNode<DIM> gn;
+                    gn.id = id++;
+                    gn.position = zero_vector<double>(DIM);
+                    gn.position[0] = x;
+                    gn.position[1] = y;
+                    gn.position[2] = z;
+                    gn.force = zero_vector<double>(DIM);
+                    gn.density = 1.0;
+                    gn.fibre_direction = zero_vector<double>(DIM);
+                    gn.fibre_direction[0] = 1.0;
+                    gn.anisotropy = 0.0;
+                    gn.is_active = true;
+                    mNodes.push_back(gn);
+                }
+            }
+        }
+        mNumActive = mNodes.size();
+    }
+
+    void InitialiseFibres(const std::string& pattern)
+    {
+        for (auto& node : mNodes)
+        {
+            if (pattern == "radial")
+            {
+                double r = norm_2(node.position);
+                if (r > 1e-10)
+                    node.fibre_direction = node.position / r;
+                else
+                {
+                    node.fibre_direction = zero_vector<double>(DIM);
+                    node.fibre_direction[0] = 1.0;
+                }
+                node.anisotropy = 0.5;
+            }
+            else if (pattern == "parallel")
+            {
+                node.fibre_direction = zero_vector<double>(DIM);
+                node.fibre_direction[0] = 1.0;
+                node.anisotropy = 1.0;
+            }
+            else  // "random"
+            {
+                if (DIM == 2)
+                {
+                    double angle = RandomNumberGenerator::Instance()->ranf() * 2.0 * M_PI;
+                    node.fibre_direction[0] = std::cos(angle);
+                    node.fibre_direction[1] = std::sin(angle);
+                }
+                else
+                {
+                    double theta = std::acos(1.0 - 2.0 * RandomNumberGenerator::Instance()->ranf());
+                    double phi = RandomNumberGenerator::Instance()->ranf() * 2.0 * M_PI;
+                    node.fibre_direction[0] = std::sin(theta) * std::cos(phi);
+                    node.fibre_direction[1] = std::sin(theta) * std::sin(phi);
+                    node.fibre_direction[2] = std::cos(theta);
+                }
+                node.anisotropy = 0.0;
+            }
+        }
+    }
+
+    /**
+     * Build neighbour connectivity and initialise per-pair rest lengths
+     * to the initial spacing.
+     */
+    void BuildNeighbourConnectivity(double cutoff)
+    {
+        double cutoff_sq = cutoff * cutoff;
+        int range = static_cast<int>(std::ceil(cutoff / mSpatialHashCellSize));
+
+        for (unsigned i = 0; i < mNodes.size(); i++)
+        {
+            const auto& pos_i = mNodes[i].position;
+            int cx = static_cast<int>((pos_i[0] - mHashMin[0]) / mSpatialHashCellSize);
+            int cy = static_cast<int>((pos_i[1] - mHashMin[1]) / mSpatialHashCellSize);
+
+            if (DIM == 2)
+            {
+                for (int ix = cx - range; ix <= cx + range; ix++)
+                {
+                    for (int iy = cy - range; iy <= cy + range; iy++)
+                    {
+                        if (ix < 0 || ix >= mHashN[0] || iy < 0 || iy >= mHashN[1]) continue;
+                        const auto& bucket = mSpatialHash[GetHashIndex(ix, iy)];
+                        for (unsigned j : bucket)
+                        {
+                            if (j <= i) continue;
+                            c_vector<double, DIM> disp = mNodes[j].position - pos_i;
+                            double dist_sq = inner_prod(disp, disp);
+                            if (dist_sq < cutoff_sq)
+                            {
+                                double initial_rest = std::sqrt(dist_sq);
+                                mNodes[i].neighbours.push_back(j);
+                                mNodes[i].rest_lengths.push_back(initial_rest);
+                                mNodes[j].neighbours.push_back(i);
+                                mNodes[j].rest_lengths.push_back(initial_rest);
+                            }
+                        }
+                    }
+                }
+            }
+            else // DIM == 3
+            {
+                int cz = static_cast<int>((pos_i[2] - mHashMin[2]) / mSpatialHashCellSize);
+                for (int ix = cx - range; ix <= cx + range; ix++)
+                {
+                    for (int iy = cy - range; iy <= cy + range; iy++)
+                    {
+                        for (int iz = cz - range; iz <= cz + range; iz++)
+                        {
+                            if (ix < 0 || ix >= mHashN[0] || iy < 0 || iy >= mHashN[1]
+                                || iz < 0 || iz >= mHashN[2]) continue;
+                            const auto& bucket = mSpatialHash[GetHashIndex(ix, iy, iz)];
+                            for (unsigned j : bucket)
+                            {
+                                if (j <= i) continue;
+                                c_vector<double, DIM> disp = mNodes[j].position - pos_i;
+                                double dist_sq = inner_prod(disp, disp);
+                                if (dist_sq < cutoff_sq)
+                                {
+                                    double initial_rest = std::sqrt(dist_sq);
+                                    mNodes[i].neighbours.push_back(j);
+                                    mNodes[i].rest_lengths.push_back(initial_rest);
+                                    mNodes[j].neighbours.push_back(i);
+                                    mNodes[j].rest_lengths.push_back(initial_rest);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Find the index in node j's neighbour list that points back to node i.
+     * Required to keep per-pair rest lengths symmetric.
+     */
+    unsigned FindReciprocalIndex(unsigned j, unsigned i) const
+    {
+        const auto& n_list = mNodes[j].neighbours;
+        for (unsigned k = 0; k < n_list.size(); k++)
+        {
+            if (n_list[k] == i) return k;
+        }
+        // Should never happen for a well-formed connectivity graph
+        assert(false);
+        return 0;
+    }
+
+    void UpdateActiveCount()
+    {
+        mNumActive = 0;
+        for (const auto& n : mNodes)
+        {
+            if (n.is_active) mNumActive++;
+        }
+    }
+
+    void RebuildSpatialHash()
+    {
+        for (auto& bucket : mSpatialHash)
+            bucket.clear();
+
+        for (unsigned i = 0; i < mNodes.size(); i++)
+        {
+            if (!mNodes[i].is_active) continue;
+            int cx = static_cast<int>((mNodes[i].position[0] - mHashMin[0]) / mSpatialHashCellSize);
+            int cy = static_cast<int>((mNodes[i].position[1] - mHashMin[1]) / mSpatialHashCellSize);
+
+            if (DIM == 2)
+            {
+                if (cx >= 0 && cx < mHashN[0] && cy >= 0 && cy < mHashN[1])
+                    mSpatialHash[GetHashIndex(cx, cy)].push_back(i);
+            }
+            else // DIM == 3
+            {
+                int cz = static_cast<int>((mNodes[i].position[2] - mHashMin[2]) / mSpatialHashCellSize);
+                if (cx >= 0 && cx < mHashN[0] && cy >= 0 && cy < mHashN[1]
+                    && cz >= 0 && cz < mHashN[2])
+                    mSpatialHash[GetHashIndex(cx, cy, cz)].push_back(i);
+            }
+        }
+    }
+};
+
+#endif // VISCOELASTICGHOSTNODEECMFIELD_HPP_

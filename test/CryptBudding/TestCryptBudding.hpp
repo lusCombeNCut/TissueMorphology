@@ -743,8 +743,7 @@ private:
         if (p.enableLumenPressure)
         {
             MAKE_PTR(LumenPressureForce<2>, p_lumen);
-            p_lumen->SetPressureStrength(p.lumenPressure);
-            p_lumen->SetLumenEquilibriumRadius(p.lumenEqRadius2d);
+            p_lumen->SetPressure(p.lumenPressure);
             p_lumen->SetTrackCenter(true);
             simulator.AddForce(p_lumen);
         }
@@ -953,8 +952,7 @@ private:
         if (p.enableLumenPressure)
         {
             MAKE_PTR(LumenPressureForce<2>, p_lumen);
-            p_lumen->SetPressureStrength(p.lumenPressure);
-            p_lumen->SetLumenEquilibriumRadius(p.outerRadius2d + 1.0);
+            p_lumen->SetPressure(p.lumenPressure);
             p_lumen->SetTrackCenter(true);
             simulator.AddForce(p_lumen);
         }
@@ -1124,8 +1122,7 @@ private:
         if (p.enableLumenPressure)
         {
             MAKE_PTR(LumenPressureForce<3>, p_lumen);
-            p_lumen->SetPressureStrength(p.lumenPressure);
-            p_lumen->SetLumenEquilibriumRadius(p.organoidRadius3d + 1.0);
+            p_lumen->SetPressure(p.lumenPressure);
             p_lumen->SetTrackCenter(true);
             simulator.AddForce(p_lumen);
         }

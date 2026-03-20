@@ -1,9 +1,4 @@
 TestHello_TissueMorphology.hpp
-redundent/CryptBudding2d/Test2dCryptBuddingNodeBased.hpp
-redundent/CryptBudding2d/Test2dCryptBuddingVertexBased.hpp
-redundent/CryptBudding3d/Test3dOrganoidFormation.hpp
-redundent/CryptBudding3d/Test3dCryptOrganoid.hpp
-redundent/CryptBudding3d/Test3dVertexCryptOrganoid.hpp
 CryptBudding/TestCryptBudding.hpp
 ECMForces/TestThresholdECMForce.hpp
 ECMForces/Test2dThresholdECMForce.hpp

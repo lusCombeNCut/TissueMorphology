@@ -17,6 +17,7 @@ All rights reserved.
 #include "SimulationTime.hpp"
 #include "SimProfiler.hpp"
 #include <boost/shared_ptr.hpp>
+#include <cmath>
 
 /**
  * ECM Confinement Force — agent-based viscoelastic model
@@ -33,18 +34,20 @@ All rights reserved.
  * Physics:
  *   For each cell i interacting with ECM element j within the cutoff:
  *
- *     F_ij = k × ρ_j × (d_ij − s₀) × d̂_ij
+ *     F_ij = k × ρ_j × A_ij × (d_ij − s₀) × d̂_ij
  *
  *   where:
  *     k      = spring stiffness (mConfinementStiffness)
  *     ρ_j    = ECM density at element j ∈ [0,1] — acts as a force multiplier
+ *     A_ij   = guidance alignment multiplier from cell motion vs local fiber
  *     d_ij   = distance between cell and ECM element
  *     s₀     = spring rest length (mEcmSpringRestLength)
  *     d̂_ij   = unit vector from cell to ECM element
  *
  *   When d > s₀: cell is pulled toward ECM element (adhesion)
  *   When d < s₀: cell is pushed away from ECM element (repulsion)
- *   Force is purely linear — no log/exp corrections.
+ *   Force is linear in overlap, with ECM-dependent modulation and no
+ *   log/exp corrections.
  *
  *   Cells also degrade ECM at their position (MMP secretion) and
  *   optionally remodel ECM fiber orientation via traction.
@@ -174,6 +177,25 @@ public:
             c_vector<double, DIM> total_ecm_force = zero_vector<double>(DIM);
             double max_density = 0.0;
 
+            // Use the cell's last movement direction if available.
+            c_vector<double, DIM> last_movement = zero_vector<double>(DIM);
+            bool has_last_movement = false;
+            try
+            {
+                last_movement[0] = cell_iter->GetCellData()->GetItem("migration_direction_x");
+                last_movement[1] = cell_iter->GetCellData()->GetItem("migration_direction_y");
+                if (norm_2(last_movement) > 1e-10)
+                {
+                    last_movement /= norm_2(last_movement);
+                    has_last_movement = true;
+                }
+            }
+            catch (Exception&)
+            {
+                // If movement history is not present, fall back to unbiased modulation.
+                has_last_movement = false;
+            }
+
             for (unsigned e = 0; e < nearby_positions.size(); e++)
             {
                 c_vector<double, DIM> disp = nearby_positions[e] - pos;  // cell → ECM element
@@ -184,11 +206,33 @@ public:
                 c_vector<double, DIM> unit_disp = disp / distance;
                 double density = nearby_densities[e];
 
-                // Purely linear spring: F = k × ρ × (d − s₀) × d̂
+                // Local ECM guidance state at the interacting element.
+                double ecm_angle = mpECMField->GetFiberAngleAt(nearby_positions[e]);
+                double ecm_anisotropy = mpECMField->GetAnisotropyAt(nearby_positions[e]);
+                c_vector<double, DIM> ecm_fiber = zero_vector<double>(DIM);
+                ecm_fiber[0] = std::cos(ecm_angle);
+                ecm_fiber[1] = std::sin(ecm_angle);
+
+                // Alignment with local fiber axis is bidirectional, so use |dot|.
+                double alignment = 1.0;
+                if (has_last_movement)
+                {
+                    alignment = std::fabs(inner_prod(last_movement, ecm_fiber));
+                }
+
+                // Effective modulation mirrors contact-guidance weighting:
+                // anisotropy contributes only where ECM is present.
+                double effective_anisotropy = ecm_anisotropy * density;
+                double alignment_multiplier = (1.0 - effective_anisotropy) +
+                                              effective_anisotropy * alignment;
+
+                // Linear spring with density + fiber-alignment modulation:
+                // F = k × ρ × alignment_multiplier × (d − s₀) × d̂
                 // d > s₀ → force toward ECM element (adhesion/attraction)
                 // d < s₀ → force away from ECM element (repulsion)
                 double overlap = distance - mEcmSpringRestLength;
-                c_vector<double, DIM> spring_force = mConfinementStiffness * density * overlap * unit_disp;
+                c_vector<double, DIM> spring_force =
+                    mConfinementStiffness * density * alignment_multiplier * overlap * unit_disp;
 
                 total_ecm_force += spring_force;
 

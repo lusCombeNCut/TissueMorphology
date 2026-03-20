@@ -1,6 +1,14 @@
 # Cell Proliferation and Death Implementation for Intestinal Organoids
 
-## Current State
+> **⚠ HISTORICAL DOCUMENT** — Written during early development (pre-CryptBuddingApp).
+> The actual implementation now uses custom cell cycle models in `src/`:
+> - `StochasticFourTypeCellCycleModel.hpp` — stochastic SC/TA/PC/EC transitions (Montes-Olivas 2023) with contact inhibition (**current default**)
+> - `UniformContactInhibitionGenerationalCellCycleModel.hpp` — generational cascade (Meineke 2001)
+> - `UniformContactInhibitionCellCycleModel.hpp` — simple contact inhibition (no generation tracking)
+>
+> See `docs/ConstitutiveEquations_CellCycles.md` and `apps/README.md` for current documentation.
+
+## Current State (as of early development)
 
 ### Cell-Cell Adhesion (Factor 1)
 - **Implementation**: `GeneralisedLinearSpringForce`

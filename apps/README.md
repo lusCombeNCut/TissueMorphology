@@ -34,10 +34,28 @@ This document maps configuration parameters to their corresponding C++ classes.
 
 ## Cell Cycle → C++ Classes
 
-| Parameter | C++ Class | Description |
-|-----------|-----------|-------------|
-| `enableGenerationalCascade = false` | `UniformContactInhibitionCellCycleModel` | Simple contact inhibition |
-| `enableGenerationalCascade = true` | `UniformContactInhibitionGenerationalCellCycleModel` | Generational cascade (Meineke et al. 2001) |
+| Parameter(s) | C++ Class | Description |
+|-------------|-----------|-------------|
+| `enableStochasticFourType = true` | `StochasticFourTypeCellCycleModel` | Stochastic SC/TA/PC/EC transitions (Montes-Olivas et al. 2023) with contact inhibition |
+| `enableGenerationalCascade = true` | `UniformContactInhibitionGenerationalCellCycleModel` | Generational cascade (Meineke et al. 2001) — legacy, disabled by default |
+| *(both false)* | `UniformContactInhibitionCellCycleModel` | Simple contact inhibition only |
+
+### Stochastic 4-Type Model Parameters
+
+| INI Parameter | Default | Description |
+|--------------|---------|-------------|
+| `probStemToStem` | 0.89 | P(SC daughter = SC) |
+| `probStemToPaneth` | 0.09 | P(SC daughter = PC); P(SC→TA) = 1 − p_sc − p_pc |
+| `probTaToTaEarly` | 0.9 | P(TA daughter = TA) for t < `transitionTime` |
+| `probTaToTaLate` | 0.7 | P(TA daughter = TA) for t ≥ `transitionTime` |
+| `transitionTime` | 120.0 | Hours at which TA probabilities switch (day 5) |
+| `panethFraction` | 0.09 | Initial fraction of Paneth cells |
+
+Cell types are encoded via `AbstractCellMutationState` subclasses:
+- **Stem (SC)**: `WildTypeCellMutationState` + `TransitCellProliferativeType`
+- **Transit-Amplifying (TA)**: `TACellMutationState` + `TransitCellProliferativeType`
+- **Paneth (PC)**: `PanethCellMutationState` + `DifferentiatedCellProliferativeType` (non-proliferative)
+- **Enterocyte (EC)**: `EnterocyteCellMutationState` + `DifferentiatedCellProliferativeType` (non-proliferative)
 
 ## Other Components
 
@@ -48,7 +66,8 @@ This document maps configuration parameters to their corresponding C++ classes.
 | ECM field visualization | `ECMFieldWriter`, `ECMFieldWriter3d` | VTK output of ECM density |
 | Ring outline visualization | `RingOutlineWriter` | VTP polydata for 2D ring boundary |
 | Cell polarity output | `CellPolarityWriter` | Writes polarity vectors to VTK |
-| Division rules | `TangentialCentreBasedDivisionRule`, `RadialVertexBasedDivisionRule` | Cell division orientation |
+| Division rules (node) | `TangentialCentreBasedDivisionRule` | Tangential division on ring/surface |
+| Division rules (vertex) | `LocalTangentVertexBasedDivisionRule` | Local tangent-aligned vertex division |
 
 ## Source File Locations
 

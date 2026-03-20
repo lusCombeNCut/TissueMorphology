@@ -42,12 +42,19 @@
 #include "DynamicECMField3d.hpp"
 #include "ECMConfinementForce3d.hpp"
 #include "ECMFieldWriter3d.hpp"
+#include "GhostNodeEcmField.hpp"
+#include "GhostNodeEcmForce.hpp"
+#include "GhostNodeEcmWriter.hpp"
+#include "ViscoelasticGhostNodeEcmField.hpp"
+#include "ViscoelasticGhostNodeEcmForce.hpp"
+#include "ViscoelasticGhostNodeEcmWriter.hpp"
 
 #include "VolumeTrackingModifier.hpp"
 #include "CellIdWriter.hpp"
 #include "CellAgesWriter.hpp"
 #include "CellProliferativeTypesCountWriter.hpp"
 #include "CellPolarityWriter.hpp"
+#include "CellLumenForceWriter.hpp"
 #include "CellContactInhibitionStatusWriter.hpp"
 #include "TangentialCentreBasedDivisionRule.hpp"
 
@@ -221,7 +228,9 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
         auto p_lumen = boost::make_shared<LumenPressureForce<3>>();
         p_lumen->SetPressure(p.lumenPressure);
         p_lumen->SetTrackCenter(true);
+        p_lumen->SetWriteForce(true);
         simulator.AddForce(p_lumen);
+        population.AddCellWriter<CellLumenForceWriter>();
     }
 
     if (p.enableApicalConstriction)
@@ -257,54 +266,139 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
     // ------------------------------------------------------------------
     // ECM field (shared between confinement and guidance forces)
     // ------------------------------------------------------------------
-    boost::shared_ptr<DynamicECMField3d> pEcmField;
-    if (p.enableEcmConfinement || p.enableEcmGuidance)
+    if (p.enableGhostNodeECM)
     {
-        pEcmField.reset(new DynamicECMField3d(
-            "radial", p.ecmGridSpacing,
-            -p.ecmDomainHalf, p.ecmDomainHalf,
-            -p.ecmDomainHalf, p.ecmDomainHalf,
-            -p.ecmDomainHalf, p.ecmDomainHalf));
-        pEcmField->SetDegradationRate(p.ecmDegradationRate);
-        pEcmField->SetDiffusionCoeff(p.ecmDiffusionCoeff);
-        pEcmField->SetRemodelingRate(0.05);
-        pEcmField->SetDepositionRate(0.0003);
+        // ── Ghost node ECM (off-lattice particle-based) ──────────
+        double gn_spacing = p.ecmGridSpacing;
+        double gn_rest = (p.ghostSpringRestLength > 0.0) ? p.ghostSpringRestLength : gn_spacing;
 
-        // Clear ECM density inside the organoid — no matrix in the lumen;
-        // ECM only exists outside the cell shell.
-        double ecm_clear_radius = p.organoidRadius3d + 0.5 * p.ecmGridSpacing;
-        pEcmField->ClearDensityInsideRadius(center3d, ecm_clear_radius);
+        if (p.enableViscoelasticECM)
+        {
+            // ── Viscoelastic constitutive model ──────────────────
+            boost::shared_ptr<ViscoelasticGhostNodeEcmField<3>> p_ve_field(
+                new ViscoelasticGhostNodeEcmField<3>("radial", gn_spacing,
+                                     -p.ecmDomainHalf, p.ecmDomainHalf,
+                                     -p.ecmDomainHalf, p.ecmDomainHalf,
+                                     -p.ecmDomainHalf, p.ecmDomainHalf,
+                                     "cubic"));
+            p_ve_field->SetRelaxedStiffness(p.ghostRelaxedStiffness);
+            p_ve_field->SetRelaxationModulus(p.ghostRelaxationModulus);
+            p_ve_field->SetRelaxationTime(p.ghostRelaxationTime);
+            p_ve_field->SetGhostDamping(p.ghostDamping);
+            p_ve_field->SetDegradationRate(p.ecmDegradationRate);
+            p_ve_field->SetRemovalThreshold(p.ghostRemovalThreshold);
+            p_ve_field->SetFibreRemodelingRate(p.ghostFibreRemodelingRate);
+            p_ve_field->SetAnisotropyStrength(p.ghostAnisotropyStrength);
+
+            double ecm_clear_radius = p.organoidRadius3d + 0.5 * gn_spacing;
+            p_ve_field->ClearDensityInsideRadius(center3d, ecm_clear_radius);
+
+            if (p.enableEcmConfinement)
+            {
+                MAKE_PTR(ViscoelasticGhostNodeEcmForce<3>, p_ve_force);
+                p_ve_force->SetGhostField(p_ve_field);
+                p_ve_force->SetCellGhostStiffness(p.ghostCellGhostStiffness);
+                p_ve_force->SetCellGhostRestLength(p.ghostCellGhostRestLength);
+                p_ve_force->SetCellGhostCutoff(p.ghostCellGhostCutoff);
+                p_ve_force->SetDegradationEnabled(true);
+                p_ve_force->SetRemodelingEnabled(p.enableEcmGuidance);
+                p_ve_force->SetTrackCenter(true);
+                p_ve_force->SetRemovalCheckInterval(p.ghostRemovalCheckInterval);
+                simulator.AddForce(p_ve_force);
+            }
+
+            boost::shared_ptr<ViscoelasticGhostNodeEcmWriter<3>> p_ve_writer(
+                new ViscoelasticGhostNodeEcmWriter<3>(p_ve_field, p.samplingMultiple));
+            simulator.AddSimulationModifier(p_ve_writer);
+        }
+        else
+        {
+            // ── Original elastic ghost node ECM ──────────────────
+            boost::shared_ptr<GhostNodeEcmField<3>> p_ghost_field(
+                new GhostNodeEcmField<3>("radial", gn_spacing,
+                                     -p.ecmDomainHalf, p.ecmDomainHalf,
+                                     -p.ecmDomainHalf, p.ecmDomainHalf,
+                                     -p.ecmDomainHalf, p.ecmDomainHalf,
+                                     "cubic"));
+            p_ghost_field->SetGhostGhostStiffness(p.ghostGhostStiffness);
+            p_ghost_field->SetGhostDamping(p.ghostDamping);
+            p_ghost_field->SetDegradationRate(p.ecmDegradationRate);
+            p_ghost_field->SetRemovalThreshold(p.ghostRemovalThreshold);
+            p_ghost_field->SetFibreRemodelingRate(p.ghostFibreRemodelingRate);
+            p_ghost_field->SetAnisotropyStrength(p.ghostAnisotropyStrength);
+            p_ghost_field->SetGhostRestLength(gn_rest);
+
+            double ecm_clear_radius = p.organoidRadius3d + 0.5 * gn_spacing;
+            p_ghost_field->ClearDensityInsideRadius(center3d, ecm_clear_radius);
+
+            if (p.enableEcmConfinement)
+            {
+                MAKE_PTR(GhostNodeEcmForce<3>, p_gn_force);
+                p_gn_force->SetGhostField(p_ghost_field);
+                p_gn_force->SetCellGhostStiffness(p.ghostCellGhostStiffness);
+                p_gn_force->SetCellGhostRestLength(p.ghostCellGhostRestLength);
+                p_gn_force->SetCellGhostCutoff(p.ghostCellGhostCutoff);
+                p_gn_force->SetDegradationEnabled(true);
+                p_gn_force->SetRemodelingEnabled(p.enableEcmGuidance);
+                p_gn_force->SetTrackCenter(true);
+                p_gn_force->SetRemovalCheckInterval(p.ghostRemovalCheckInterval);
+                simulator.AddForce(p_gn_force);
+            }
+
+            boost::shared_ptr<GhostNodeEcmWriter<3>> p_gn_writer(
+                new GhostNodeEcmWriter<3>(p_ghost_field, p.samplingMultiple));
+            simulator.AddSimulationModifier(p_gn_writer);
+        }
     }
-
-    if (p.enableEcmConfinement && pEcmField)
+    else
     {
-        auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
-        p_ecm_conf->SetECMField(pEcmField);
-        p_ecm_conf->SetConfinementStiffness(p.ecmConfinementStiffness);
-        p_ecm_conf->SetDegradationEnabled(true);
-        p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
-        p_ecm_conf->SetTrackCenter(true);
-        simulator.AddForce(p_ecm_conf);
-    }
+        // ── Grid-based ECM (original) ────────────────────────────
+        boost::shared_ptr<DynamicECMField3d> pEcmField;
+        if (p.enableEcmConfinement || p.enableEcmGuidance)
+        {
+            pEcmField.reset(new DynamicECMField3d(
+                "radial", p.ecmGridSpacing,
+                -p.ecmDomainHalf, p.ecmDomainHalf,
+                -p.ecmDomainHalf, p.ecmDomainHalf,
+                -p.ecmDomainHalf, p.ecmDomainHalf));
+            pEcmField->SetDegradationRate(p.ecmDegradationRate);
+            pEcmField->SetDiffusionCoeff(p.ecmDiffusionCoeff);
+            pEcmField->SetRemodelingRate(0.05);
+            pEcmField->SetDepositionRate(0.0003);
 
-    if (p.enableEcmGuidance && pEcmField)
-    {
-        auto p_ecm = boost::make_shared<DynamicECMContactGuidanceForce3d>();
-        p_ecm->SetECMField(pEcmField);
-        p_ecm->SetBaseSpeed(p.ecmBaseSpeed);
-        p_ecm->SetECMSensitivity(1.0);
-        p_ecm->SetEnableDegradation(true);
-        p_ecm->SetEnableRemodeling(true);
-        p_ecm->SetEnableDeposition(false);
-        simulator.AddForce(p_ecm);
-    }
+            double ecm_clear_radius = p.organoidRadius3d + 0.5 * p.ecmGridSpacing;
+            pEcmField->ClearDensityInsideRadius(center3d, ecm_clear_radius);
+        }
 
-    // ECM field VTI writer for ParaView visualization
-    if (pEcmField)
-    {
-        boost::shared_ptr<ECMFieldWriter3d> p_ecm_writer(
-            new ECMFieldWriter3d(pEcmField, p.samplingMultiple));
-        simulator.AddSimulationModifier(p_ecm_writer);
+        if (p.enableEcmConfinement && pEcmField)
+        {
+            auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
+            p_ecm_conf->SetECMField(pEcmField);
+            p_ecm_conf->SetConfinementStiffness(p.ecmConfinementStiffness);
+            p_ecm_conf->SetDegradationEnabled(true);
+            p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
+            p_ecm_conf->SetTrackCenter(true);
+            simulator.AddForce(p_ecm_conf);
+        }
+
+        if (p.enableEcmGuidance && pEcmField)
+        {
+            auto p_ecm = boost::make_shared<DynamicECMContactGuidanceForce3d>();
+            p_ecm->SetECMField(pEcmField);
+            p_ecm->SetBaseSpeed(p.ecmBaseSpeed);
+            p_ecm->SetECMSensitivity(1.0);
+            p_ecm->SetEnableDegradation(true);
+            p_ecm->SetEnableRemodeling(true);
+            p_ecm->SetEnableDeposition(false);
+            simulator.AddForce(p_ecm);
+        }
+
+        if (pEcmField)
+        {
+            boost::shared_ptr<ECMFieldWriter3d> p_ecm_writer(
+                new ECMFieldWriter3d(pEcmField, p.samplingMultiple));
+            simulator.AddSimulationModifier(p_ecm_writer);
+        }
     }
 
     if (p.enableSloughing)

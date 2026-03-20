@@ -46,6 +46,12 @@
 #include "DynamicECMField3d.hpp"
 #include "ECMConfinementForce3d.hpp"
 #include "ECMFieldWriter3d.hpp"
+#include "GhostNodeEcmField.hpp"
+#include "GhostNodeEcmForce.hpp"
+#include "GhostNodeEcmWriter.hpp"
+#include "ViscoelasticGhostNodeEcmField.hpp"
+#include "ViscoelasticGhostNodeEcmForce.hpp"
+#include "ViscoelasticGhostNodeEcmWriter.hpp"
 
 #include "VolumeTrackingModifier.hpp"
 #include "GeometricalTargetVolumeModifier.hpp"
@@ -269,9 +275,80 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     // ------------------------------------------------------------------
     // ECM field (shared between confinement and guidance forces)
     // ------------------------------------------------------------------
+    boost::shared_ptr<GhostNodeEcmField<3>> pGhostField;
+    boost::shared_ptr<ViscoelasticGhostNodeEcmField<3>> pVeField;
     boost::shared_ptr<DynamicECMField3d> pEcmField;
-    if (p.enableEcmConfinement || p.enableEcmGuidance)
+
+    if (p.enableGhostNodeECM)
     {
+        // ── Ghost node ECM (off-lattice particle-based) ──────────
+        double gn_spacing = p.ecmGridSpacing;
+        double gn_rest = (p.ghostSpringRestLength > 0.0) ? p.ghostSpringRestLength : gn_spacing;
+
+        c_vector<double, 3> center3d = zero_vector<double>(3);
+        double ecm_clear_radius = p.sphereRadius3dVertex + height;
+
+        if (p.enableViscoelasticECM)
+        {
+            // ── Viscoelastic constitutive model ──────────────────
+            pVeField.reset(new ViscoelasticGhostNodeEcmField<3>(
+                "radial", gn_spacing,
+                -p.ecmDomainHalf, p.ecmDomainHalf,
+                -p.ecmDomainHalf, p.ecmDomainHalf,
+                -p.ecmDomainHalf, p.ecmDomainHalf,
+                "cubic"));
+            pVeField->SetRelaxedStiffness(p.ghostRelaxedStiffness);
+            pVeField->SetRelaxationModulus(p.ghostRelaxationModulus);
+            pVeField->SetRelaxationTime(p.ghostRelaxationTime);
+            pVeField->SetGhostDamping(p.ghostDamping);
+            pVeField->SetDegradationRate(p.ecmDegradationRate);
+            pVeField->SetRemovalThreshold(p.ghostRemovalThreshold);
+            pVeField->SetFibreRemodelingRate(p.ghostFibreRemodelingRate);
+            pVeField->SetAnisotropyStrength(p.ghostAnisotropyStrength);
+
+            pVeField->ClearDensityInsideRadius(center3d, ecm_clear_radius);
+
+            std::cout << "  Viscoelastic Ghost ECM clear radius: " << ecm_clear_radius
+                      << " (basal surface, centroid≈" << p.sphereRadius3dVertex + height * 0.5
+                      << ", gap≈" << height * 0.5
+                      << ", cutoff=" << p.ghostCellGhostCutoff << ")" << std::endl;
+
+            boost::shared_ptr<ViscoelasticGhostNodeEcmWriter<3>> p_ve_writer(
+                new ViscoelasticGhostNodeEcmWriter<3>(pVeField, p.samplingMultiple));
+            simulator.AddSimulationModifier(p_ve_writer);
+        }
+        else
+        {
+            // ── Original elastic ghost node ECM ──────────────────
+            pGhostField.reset(new GhostNodeEcmField<3>(
+                "radial", gn_spacing,
+                -p.ecmDomainHalf, p.ecmDomainHalf,
+                -p.ecmDomainHalf, p.ecmDomainHalf,
+                -p.ecmDomainHalf, p.ecmDomainHalf,
+                "cubic"));
+            pGhostField->SetGhostGhostStiffness(p.ghostGhostStiffness);
+            pGhostField->SetGhostDamping(p.ghostDamping);
+            pGhostField->SetDegradationRate(p.ecmDegradationRate);
+            pGhostField->SetRemovalThreshold(p.ghostRemovalThreshold);
+            pGhostField->SetFibreRemodelingRate(p.ghostFibreRemodelingRate);
+            pGhostField->SetAnisotropyStrength(p.ghostAnisotropyStrength);
+            pGhostField->SetGhostRestLength(gn_rest);
+
+            pGhostField->ClearDensityInsideRadius(center3d, ecm_clear_radius);
+
+            std::cout << "  Ghost ECM clear radius: " << ecm_clear_radius
+                      << " (basal surface, centroid≈" << p.sphereRadius3dVertex + height * 0.5
+                      << ", gap≈" << height * 0.5
+                      << ", cutoff=" << p.ghostCellGhostCutoff << ")" << std::endl;
+
+            boost::shared_ptr<GhostNodeEcmWriter<3>> p_gn_writer(
+                new GhostNodeEcmWriter<3>(pGhostField, p.samplingMultiple));
+            simulator.AddSimulationModifier(p_gn_writer);
+        }
+    }
+    else if (p.enableEcmConfinement || p.enableEcmGuidance)
+    {
+        // ── Grid-based ECM (original) ────────────────────────────
         pEcmField.reset(new DynamicECMField3d(
             "radial", p.ecmGridSpacing,
             -p.ecmDomainHalf, p.ecmDomainHalf,
@@ -282,15 +359,11 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
         pEcmField->SetRemodelingRate(0.05);
         pEcmField->SetDepositionRate(0.0003);
 
-        // Clear ECM density inside the organoid
         c_vector<double, 3> center3d = zero_vector<double>(3);
         double ecm_clear_radius = (p.sphereRadius3dVertex + height) + 0.5 * p.ecmGridSpacing;
         pEcmField->ClearDensityInsideRadius(center3d, ecm_clear_radius);
-    }
 
-    // ECM field VTI writer (added before solve so it captures from start)
-    if (pEcmField)
-    {
+        // ECM field VTI writer
         boost::shared_ptr<ECMFieldWriter3d> p_ecm_writer(
             new ECMFieldWriter3d(pEcmField, p.samplingMultiple));
         simulator.AddSimulationModifier(p_ecm_writer);
@@ -374,28 +447,62 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
         }
 
         // Add ECM guidance in Phase 2
-        if (p.enableEcmGuidance && pEcmField)
+        if (p.enableGhostNodeECM && p.enableViscoelasticECM && pVeField)
         {
-            MAKE_PTR(DynamicECMContactGuidanceForce3d, p_ecm);
-            p_ecm->SetECMField(pEcmField);
-            p_ecm->SetBaseSpeed(p.ecmBaseSpeed);
-            p_ecm->SetECMSensitivity(1.0);
-            p_ecm->SetEnableDegradation(true);
-            p_ecm->SetEnableRemodeling(true);
-            p_ecm->SetEnableDeposition(false);
-            simulator.AddForce(p_ecm);
+            if (p.enableEcmConfinement)
+            {
+                MAKE_PTR(ViscoelasticGhostNodeEcmForce<3>, p_ve_force);
+                p_ve_force->SetGhostField(pVeField);
+                p_ve_force->SetCellGhostStiffness(p.ghostCellGhostStiffness);
+                p_ve_force->SetCellGhostRestLength(p.ghostCellGhostRestLength);
+                p_ve_force->SetCellGhostCutoff(p.ghostCellGhostCutoff);
+                p_ve_force->SetDegradationEnabled(true);
+                p_ve_force->SetRemodelingEnabled(p.enableEcmGuidance);
+                p_ve_force->SetTrackCenter(true);
+                p_ve_force->SetRemovalCheckInterval(p.ghostRemovalCheckInterval);
+                simulator.AddForce(p_ve_force);
+            }
         }
-
-        // Add ECM confinement in Phase 2
-        if (p.enableEcmConfinement && pEcmField)
+        else if (p.enableGhostNodeECM && pGhostField)
         {
-            auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
-            p_ecm_conf->SetECMField(pEcmField);
-            p_ecm_conf->SetConfinementStiffness(p.ecmConfinementStiffness);
-            p_ecm_conf->SetDegradationEnabled(true);
-            p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
-            p_ecm_conf->SetTrackCenter(true);
-            simulator.AddForce(p_ecm_conf);
+            if (p.enableEcmConfinement)
+            {
+                MAKE_PTR(GhostNodeEcmForce<3>, p_gn_force);
+                p_gn_force->SetGhostField(pGhostField);
+                p_gn_force->SetCellGhostStiffness(p.ghostCellGhostStiffness);
+                p_gn_force->SetCellGhostRestLength(p.ghostCellGhostRestLength);
+                p_gn_force->SetCellGhostCutoff(p.ghostCellGhostCutoff);
+                p_gn_force->SetDegradationEnabled(true);
+                p_gn_force->SetRemodelingEnabled(p.enableEcmGuidance);
+                p_gn_force->SetTrackCenter(true);
+                p_gn_force->SetRemovalCheckInterval(p.ghostRemovalCheckInterval);
+                simulator.AddForce(p_gn_force);
+            }
+        }
+        else
+        {
+            if (p.enableEcmGuidance && pEcmField)
+            {
+                MAKE_PTR(DynamicECMContactGuidanceForce3d, p_ecm);
+                p_ecm->SetECMField(pEcmField);
+                p_ecm->SetBaseSpeed(p.ecmBaseSpeed);
+                p_ecm->SetECMSensitivity(1.0);
+                p_ecm->SetEnableDegradation(true);
+                p_ecm->SetEnableRemodeling(true);
+                p_ecm->SetEnableDeposition(false);
+                simulator.AddForce(p_ecm);
+            }
+
+            if (p.enableEcmConfinement && pEcmField)
+            {
+                auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
+                p_ecm_conf->SetECMField(pEcmField);
+                p_ecm_conf->SetConfinementStiffness(p.ecmConfinementStiffness);
+                p_ecm_conf->SetDegradationEnabled(true);
+                p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
+                p_ecm_conf->SetTrackCenter(true);
+                simulator.AddForce(p_ecm_conf);
+            }
         }
 
         std::cout << "--- Phase 2: Growth (" << p.endTime << " hours, dt=" << dt_grow << ") ---" << std::endl;
@@ -425,29 +532,53 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
             simulator.AddForce(p_timed_lumen);
         }
 
-        // Add ECM guidance
-        if (p.enableEcmGuidance && pEcmField)
+        // Add ECM forces
+        if (p.enableGhostNodeECM && pGhostField)
         {
-            MAKE_PTR(DynamicECMContactGuidanceForce3d, p_ecm);
-            p_ecm->SetECMField(pEcmField);
-            p_ecm->SetBaseSpeed(p.ecmBaseSpeed);
-            p_ecm->SetECMSensitivity(1.0);
-            p_ecm->SetEnableDegradation(true);
-            p_ecm->SetEnableRemodeling(true);
-            p_ecm->SetEnableDeposition(false);
-            simulator.AddForce(p_ecm);
-        }
+            if (p.enableEcmConfinement)
+            {
+                double v3d_cutoff = std::max(p.ghostCellGhostCutoff,
+                                             height * 0.5 + p.ecmGridSpacing);
+                std::cout << "  Ghost cell-ghost cutoff (vertex3d): " << v3d_cutoff
+                          << " (height/2=" << height * 0.5
+                          << ", spacing=" << p.ecmGridSpacing << ")" << std::endl;
 
-        // Add ECM confinement
-        if (p.enableEcmConfinement && pEcmField)
+                MAKE_PTR(GhostNodeEcmForce<3>, p_gn_force);
+                p_gn_force->SetGhostField(pGhostField);
+                p_gn_force->SetCellGhostStiffness(p.ghostCellGhostStiffness);
+                p_gn_force->SetCellGhostRestLength(p.ghostCellGhostRestLength);
+                p_gn_force->SetCellGhostCutoff(v3d_cutoff);
+                p_gn_force->SetDegradationEnabled(true);
+                p_gn_force->SetRemodelingEnabled(p.enableEcmGuidance);
+                p_gn_force->SetTrackCenter(true);
+                p_gn_force->SetRemovalCheckInterval(p.ghostRemovalCheckInterval);
+                simulator.AddForce(p_gn_force);
+            }
+        }
+        else
         {
-            auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
-            p_ecm_conf->SetECMField(pEcmField);
-            p_ecm_conf->SetConfinementStiffness(p.ecmConfinementStiffness);
-            p_ecm_conf->SetDegradationEnabled(true);
-            p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
-            p_ecm_conf->SetTrackCenter(true);
-            simulator.AddForce(p_ecm_conf);
+            if (p.enableEcmGuidance && pEcmField)
+            {
+                MAKE_PTR(DynamicECMContactGuidanceForce3d, p_ecm);
+                p_ecm->SetECMField(pEcmField);
+                p_ecm->SetBaseSpeed(p.ecmBaseSpeed);
+                p_ecm->SetECMSensitivity(1.0);
+                p_ecm->SetEnableDegradation(true);
+                p_ecm->SetEnableRemodeling(true);
+                p_ecm->SetEnableDeposition(false);
+                simulator.AddForce(p_ecm);
+            }
+
+            if (p.enableEcmConfinement && pEcmField)
+            {
+                auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
+                p_ecm_conf->SetECMField(pEcmField);
+                p_ecm_conf->SetConfinementStiffness(p.ecmConfinementStiffness);
+                p_ecm_conf->SetDegradationEnabled(true);
+                p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
+                p_ecm_conf->SetTrackCenter(true);
+                simulator.AddForce(p_ecm_conf);
+            }
         }
 
         std::cout << "--- Single-phase Growth (" << p.endTime << " hours, dt=" << dt_grow << ") ---" << std::endl;

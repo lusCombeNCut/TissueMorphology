@@ -1,5 +1,11 @@
 # Three-Factor Mechanical Model for Organoid Morphogenesis
 
+> **⚠ HISTORICAL DOCUMENT** — Written during early design phase.
+> The CryptBuddingApp has evolved beyond this initial three-factor framework to include
+> ECM confinement fields (`ECMConfinementForce` + `DynamicECMField`), ring/surface
+> topology-based springs, cell polarity forces, and stochastic 4-type cell cycling.
+> See `docs/ConstitutiveEquations_Forces.md` and `apps/README.md` for current force documentation.
+
 ## Overview
 Implementation of the mechanical model from Metzcar et al. 2025, which describes organoid morphogenesis through three key mechanical factors that drive tissue folding and invagination.
 

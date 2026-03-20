@@ -6,27 +6,50 @@ A Chaste-based computational biology project for studying organoid formation, ti
 
 ```
 TissueMorphology/
-├── src/
-│   ├── BasementMembraneForce.hpp       # Radial BM constraint force
-│   ├── DifferentialAdhesionForce.hpp    # Cell-type-dependent adhesion
-│   └── OrganoidCellFactory.hpp         # Cell factory with BM properties
+├── src/                                    # Shared library classes (forces, writers, cell cycle, mutation states)
+│   ├── StochasticFourTypeCellCycleModel.hpp    # Stochastic SC/TA/PC/EC cell cycle (Montes-Olivas 2023)
+│   ├── UniformContactInhibitionCellCycleModel.hpp
+│   ├── UniformContactInhibitionGenerationalCellCycleModel.hpp
+│   ├── TACellMutationState.{hpp,cpp}           # MutationState: Transit-Amplifying
+│   ├── PanethCellMutationState.{hpp,cpp}       # MutationState: Paneth Cell
+│   ├── EnterocyteCellMutationState.{hpp,cpp}   # MutationState: Enterocyte
+│   ├── ECMConfinementForce.hpp                 # Cell-ECM spring confinement (2D)
+│   ├── DynamicECMField.hpp                     # ECM density field (2D)
+│   ├── RingSmoothingForce.hpp                  # Discrete Laplacian bending (node2d)
+│   ├── RingSpringForce.hpp                     # Topology-based springs (node2d)
+│   ├── RingTopologyTracker.hpp                 # Ring neighbour tracking (node2d)
+│   ├── FastNagaiHondaForce.hpp                 # Nagai-Honda with per-type adhesion (vertex2d)
+│   ├── LumenPressureForce.hpp                  # Hydrostatic lumen pressure
+│   ├── DifferentialAdhesionForce.hpp           # Cell-type-dependent adhesion
+│   ├── ApicalConstrictionForce.hpp             # Apical surface contractility
+│   ├── CellPolarityForce.hpp                   # Apicobasal polarity force
+│   ├── BasementMembraneForce.hpp               # Radial BM constraint (3D)
+│   ├── ...                                     # + 3D forces, writers, modifiers
+│   └── _unused/                                # Archived unused classes
+├── apps/
+│   ├── src/
+│   │   ├── CryptBuddingApp.cpp                 # Main entry point (CLI + INI dispatch)
+│   │   ├── CryptBuddingParams.hpp              # INI parser + parameter struct + autotuning
+│   │   ├── RunNode2d.hpp                       # 2D node-based runner
+│   │   ├── RunVertex2d.hpp                     # 2D vertex-based runner
+│   │   ├── RunNode3d.hpp                       # 3D node-based runner
+│   │   ├── RunVertex3d.hpp                     # 3D vertex-based runner
+│   │   ├── CryptBuddingSummaryModifier.hpp     # Per-timestep summary CSV writer
+│   │   └── CryptBuddingUtils.hpp               # Shared utilities (cell assignment, killers)
+│   ├── params-Node2d.ini                       # Tuned parameters for 2D node model
+│   ├── params-Vertex2d.ini                     # Tuned parameters for 2D vertex model
+│   ├── config/default_params.ini               # Template matching SetDefaults()
+│   └── README.md                               # Configuration reference
 ├── test/
-│   ├── Test2dCryptBuddingNodeBased.hpp # 2D node-based crypt budding sweep
-│   ├── Test2dCryptBuddingVertexBased.hpp # 2D vertex-based crypt budding sweep
-│   ├── Test2dPainterReplication.hpp    # Painter cell migration replication
-│   ├── Test3dCryptOrganoid.hpp         # 3D node-based crypt organoid
-│   ├── Test3dVertexCryptOrganoid.hpp   # 3D vertex-based crypt organoid
-│   ├── TestOrganoidFormation.hpp       # Basic organoid formation tests
-│   └── ContinuousTestPack.txt          # Registered tests for CTest
-├── hpc/
-│   ├── submit_crypt_budding_sweep.sh   # Two-phase build→run sweep (main)
-│   ├── submit_compile_test.sh          # Quick compile-only verification
-│   ├── submit_test.sh                  # Single-test submission
-│   └── submit_vertex_organoid.sh       # 3D vertex organoid submission
-├── scripts/
-│   ├── analyse_crypt_budding.py        # Post-processing & crypt counting
-│   └── ...                             # Other analysis scripts
-└── README.md
+│   ├── CryptBudding/TestCryptBudding.hpp       # Integration test
+│   ├── ECMForces/                              # ECM force unit tests
+│   ├── Invasion/                               # Invasive front experiments
+│   └── ContinuousTestPack.txt                  # CTest registration
+├── docs/                                       # Constitutive equations + design docs
+├── experiments/                                # Sweep scripts + analysis
+├── hpc/                                        # HPC submission scripts
+├── scripts/                                    # Utility scripts
+└── visualization/                              # Python visualization tools
 ```
 
 ## HPC Pipeline (BluePebble)
@@ -121,20 +144,28 @@ Produces: crypt count vs stiffness box plots, mean±SD plots, CSV summary, model
 
 > Do changes in stiffness of in-silico hydrogel simulations have the same effect as changes in in-vivo ECM stiffness?
 
-### Parameters
+### Cell Cycle Model
 
-| Parameter | Node-based | Vertex-based |
-|-----------|-----------|-------------|
-| Mesh | 20×6 honeycomb → NodesOnlyMesh | 14×8 honeycomb vertex |
-| Cell cycle | ContactInhibitionCellCycleModel | ContactInhibitionCellCycleModel |
-| Quiescent fraction | 0.8 | 0.8 |
-| BM stiffness | env `ECM_STIFFNESS` | 0.5 × env `ECM_STIFFNESS` |
-| Spring stiffness | 30.0 | NagaiHonda (deformation = `ECM_STIFFNESS`) |
-| Sloughing | PlaneBasedCellKiller at y=20 | PlaneBasedCellKiller at y=15 |
-| End time | 200 hrs | 200 hrs |
-| dt | 0.005 | 0.002 |
-| Stiffness sweep | 0.5, 1, 2, 5, 10, 20, 50 | same |
-| Replicates | 10 per stiffness | 10 per stiffness |
+The simulation uses the **Stochastic Four-Type Cell Cycle Model** (Montes-Olivas et al. 2023)
+with contact inhibition, supporting four cell types: Stem (SC), Transit-Amplifying (TA),
+Paneth (PC), and Enterocyte (EC). See `docs/ConstitutiveEquations_CellCycles.md` for full
+equations and `apps/README.md` for parameter mapping.
+
+### Key Parameters
+
+| Parameter | Node-2D | Vertex-2D |
+|-----------|---------|-----------|
+| Initial cells | 18 (ring) | 12 (annulus) |
+| Cell cycle | `StochasticFourTypeCellCycleModel` | same |
+| Quiescent fraction | 0.7 | 0.5 |
+| ECM confinement stiffness | 50 | 3.0 |
+| Spring stiffness | 15 | 5 (Nagai-Honda) |
+| Lumen mode | target-volume (K=30) | target-volume (K=500) |
+| ECM grid | hex, spacing=1 | hex, spacing=0.5 |
+| End time | 48 h (local) / sweep-dependent | 168 h |
+| dt | 0.005 | 0.005 (overrides autotuning) |
+
+See `apps/params-Node2d.ini` and `apps/params-Vertex2d.ini` for full parameter listings.
 
 ### Environment Variables
 

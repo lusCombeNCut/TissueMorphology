@@ -173,7 +173,14 @@ inline void PrintBanner(const CryptBuddingParams& p)
     std::cout << "  Crypt Budding Simulation" << std::endl;
     std::cout << "  Git Commit:     " << TM_GIT_HASH << std::endl;
     std::cout << "  Model:          " << p.modelType << std::endl;
-    std::cout << "  ECM Confinement: " << p.ecmConfinementStiffness << std::endl;
+    if (p.enableGhostNodeECM)
+    {
+        std::cout << "  Ghost ECM Stiffness: " << p.ghostGhostStiffness << std::endl;
+    }
+    else
+    {
+        std::cout << "  ECM Confinement: " << p.ecmConfinementStiffness << std::endl;
+    }
     std::cout << "  Run Number:     " << p.runNumber << std::endl;
     std::cout << "  Seed:           " << p.randomSeed << std::endl;
     std::cout << "  dt:             " << p.dt << std::endl;

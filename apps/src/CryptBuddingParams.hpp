@@ -77,9 +77,6 @@ struct CryptBuddingParams
     double ecmMaxRadius3d;
 
     double lumenPressure;
-    bool   lumenUseTargetVolume;      // Use incompressible fluid model
-    double lumenVolumeGrowthRate;     // Volume growth rate (fraction per hour)
-    double lumenBulkModulus;          // Fluid stiffness (pressure per fractional compression)
 
     double apicalConstrictionStrength;
 
@@ -129,6 +126,26 @@ struct CryptBuddingParams
     double ecmInteractionCutoff;     // Cutoff distance for cell-ECM spring interactions
     double ecmConfinementStiffness;  // Spring stiffness for cell-ECM agent interactions (defaults to ecmStiffness)
 
+    // Ghost node ECM (off-lattice particle-based ECM)
+    bool enableGhostNodeECM;            // Use ghost nodes instead of grid-based ECM
+    double ghostGhostStiffness;         // ECM-ECM spring stiffness
+    double ghostDamping;                // ECM node viscous damping coefficient
+    double ghostRemovalThreshold;       // Density below which ghost nodes are removed
+    double ghostFibreRemodelingRate;    // Rate of fibre reorientation by cell traction
+    double ghostAnisotropyStrength;     // Fibre anisotropy factor [0,1]
+    double ghostCellGhostStiffness;     // Cell-ghost spring stiffness
+    double ghostCellGhostRestLength;    // Cell-ghost spring rest length
+    double ghostCellGhostCutoff;        // Cell-ghost interaction cutoff
+    double ghostSpringRestLength;       // ECM-ECM spring rest length
+    double ghostGridSpacing;            // Ghost node grid spacing (defaults to ghostSpringRestLength)
+    unsigned ghostRemovalCheckInterval; // Steps between removal checks
+
+    // Viscoelastic constitutive model (generalised Maxwell: E(t) = E0 + E1*exp(-t/tau))
+    bool enableViscoelasticECM;             // Use viscoelastic ghost node ECM instead of elastic
+    double ghostRelaxedStiffness;           // Long-time (relaxed) modulus E0
+    double ghostRelaxationModulus;          // Transient modulus E1
+    double ghostRelaxationTime;             // Relaxation time tau (hours)
+
     double t1Threshold2d;
     double t2Threshold2d;
 
@@ -157,6 +174,16 @@ struct CryptBuddingParams
     // Generational cascade (Meineke et al. 2001)
     bool enableGenerationalCascade;     // If true: Stem → TA → Differentiated cascade
     unsigned maxTransitGenerations;     // TA cells differentiate after this many divisions
+
+    // Stochastic 4-type cell cycle (Montes-Olivas et al. 2023)
+    bool enableStochasticFourType;       // If true: use stochastic SC/TA/PC/EC transitions
+    double probStemToStem;               // P(SC daughter = SC)
+    double probStemToPaneth;             // P(SC daughter = PC)
+    // P(SC daughter = TA) = 1 - probStemToStem - probStemToPaneth
+    double probTaToTaEarly;              // P(TA daughter = TA) for t < transitionTime
+    double probTaToTaLate;               // P(TA daughter = TA) for t >= transitionTime
+    double transitionTime;               // Time (hours) at which TA probabilities switch (day 5 = 120h)
+    double panethFraction;               // Initial fraction of Paneth cells (4-type model only)
 
     // Cell polarity parameters (monolayer enforcement via ya||a-style polarity)
     double polarityBendingStrength;     // Epithelial bending force strength
@@ -217,9 +244,6 @@ struct CryptBuddingParams
         ecmDiffusionCoeff    = 0.1;    // ECM density smoothing coefficient
 
         lumenPressure          = 2.0;
-        lumenUseTargetVolume   = false;   // Default to constant pressure mode
-        lumenVolumeGrowthRate  = 0.05;    // 5% per hour
-        lumenBulkModulus       = 10.0;    // Fluid stiffness
 
         apicalConstrictionStrength = 3.0;
 
@@ -266,6 +290,26 @@ struct CryptBuddingParams
         ecmInteractionCutoff     = 1.5;    // Cutoff distance for cell-ECM interactions
         ecmConfinementStiffness  = -1.0;   // sentinel: falls back to ecmStiffness in Finalise()
 
+        // Ghost node ECM defaults
+        enableGhostNodeECM          = false;
+        ghostGhostStiffness         = 15.0;
+        ghostDamping                = 5.0;
+        ghostRemovalThreshold       = 0.05;
+        ghostFibreRemodelingRate    = 0.1;
+        ghostAnisotropyStrength     = 0.5;
+        ghostCellGhostStiffness     = 10.0;
+        ghostCellGhostRestLength    = 0.0;
+        ghostCellGhostCutoff        = 1.5;
+        ghostSpringRestLength       = -1.0;  // sentinel: auto-derive from grid spacing
+        ghostGridSpacing            = -1.0;  // sentinel: defaults to ghostSpringRestLength (or ecmGridSpacing if rest length also unset)
+        ghostRemovalCheckInterval   = 100;
+
+        // Viscoelastic ECM (generalised Maxwell model)
+        enableViscoelasticECM       = false;
+        ghostRelaxedStiffness       = 5.0;    // E0: long-time modulus
+        ghostRelaxationModulus      = 1.0;    // E1: transient modulus
+        ghostRelaxationTime         = 1.0;    // tau: relaxation time (hours)
+
         // Curvature bending force (Drasdo 2000 - monolayer enforcement)
         enableCurvatureBending    = true;   // Enable by default for node2d
         bendingStiffness          = 5.0;    // Bending rigidity
@@ -288,6 +332,15 @@ struct CryptBuddingParams
         enableGenerationalCascade = true;   // Enable Stem → TA → Differentiated cascade
         maxTransitGenerations = 3;          // TA cells differentiate after 3 divisions
 
+        // Stochastic 4-type cell cycle (Montes-Olivas et al. 2023)
+        enableStochasticFourType = false;   // Disabled by default (uses generational cascade)
+        probStemToStem    = 0.89;           // P(SC daughter = SC)
+        probStemToPaneth  = 0.09;           // P(SC daughter = PC)
+        probTaToTaEarly   = 0.9;            // P(TA daughter = TA) days 1-4
+        probTaToTaLate    = 0.7;            // P(TA daughter = TA) days 5-7
+        transitionTime    = 120.0;          // day 5 = 120 hours
+        panethFraction    = 0.09;           // Initial PC fraction (4-type model)
+
         // Cell polarity (ya||a-style monolayer enforcement)
         enableCellPolarity          = true;   // Enable by default for node models
         polarityBendingStrength     = 0.3;    // Epithelial bending force
@@ -300,11 +353,10 @@ struct CryptBuddingParams
 
     void Finalise()
     {
-        // If ecmConfinementStiffness was not explicitly set, fall back to ecmStiffness
-        if (ecmConfinementStiffness < 0.0)
-        {
-            ecmConfinementStiffness = ecmStiffness;
-        }
+        // Unify all ECM stiffness parameters from the single ecmStiffness knob
+        ecmConfinementStiffness = ecmStiffness;
+        ghostGhostStiffness     = ecmStiffness;
+        ghostCellGhostStiffness = ecmStiffness;
 
         randomSeed = static_cast<unsigned>(ecmConfinementStiffness * 10000) + runNumber * 137;
 
@@ -320,6 +372,13 @@ struct CryptBuddingParams
             double w = 2.0 * M_PI * R_mid / numCells2dVertex;  // = 1.0
             innerRadius2d = R_mid - 0.5 * w;
             outerRadius2d = R_mid + 0.5 * w;
+        }
+
+        // For vertex2d, organoidRadius2d must match the actual mesh size,
+        // not the node model size, so ECM domain and clear radius are correct.
+        if (modelType == "vertex2d")
+        {
+            organoidRadius2d = outerRadius2d;
         }
 
         // Derive organoidRadius3d from numCells so Voronoi cell area ≈ 1.0²
@@ -347,6 +406,12 @@ struct CryptBuddingParams
             std::cout << "  ECM domain auto-derived: ecmDomainHalf = " << ecmDomainHalf
                       << " (organoidR=" << organoidRadius3d
                       << ", ecmMaxR=" << ecmMaxRadius3d << ")" << std::endl;
+        }
+
+        // Resolve ghost node grid spacing: ghostGridSpacing > ghostSpringRestLength > ecmGridSpacing
+        if (ghostGridSpacing < 0.0)
+        {
+            ghostGridSpacing = (ghostSpringRestLength > 0.0) ? ghostSpringRestLength : ecmGridSpacing;
         }
 
         if (modelType == "node2d")
@@ -528,6 +593,7 @@ struct CryptBuddingParams
         getBool("enableLumenHole", enableLumenHole);
         getBool("useTopologyBasedSprings", useTopologyBasedSprings);
         getBool("enableContinuousPvd", enableContinuousPvd);
+        getBool("enableGhostNodeECM", enableGhostNodeECM);
 
         if (configMap.count("dt")) { getDouble("dt", dt); dtOverridden = true; }
         if (configMap.count("endTime")) { getDouble("endTime", endTime); endTimeOverridden = true; }
@@ -559,9 +625,6 @@ struct CryptBuddingParams
         getDouble("ecmMaxRadiusFraction", ecmMaxRadiusFraction);
 
         getDouble("lumenPressure", lumenPressure);
-        getBool("lumenUseTargetVolume", lumenUseTargetVolume);
-        getDouble("lumenVolumeGrowthRate", lumenVolumeGrowthRate);
-        getDouble("lumenBulkModulus", lumenBulkModulus);
 
         getDouble("apicalConstrictionStrength", apicalConstrictionStrength);
 
@@ -606,6 +669,25 @@ struct CryptBuddingParams
         getDouble("ecmInteractionCutoff", ecmInteractionCutoff);
         getDouble("ecmConfinementStiffness", ecmConfinementStiffness);
 
+        // Ghost node ECM parameters
+        getDouble("ghostGhostStiffness", ghostGhostStiffness);
+        getDouble("ghostDamping", ghostDamping);
+        getDouble("ghostRemovalThreshold", ghostRemovalThreshold);
+        getDouble("ghostFibreRemodelingRate", ghostFibreRemodelingRate);
+        getDouble("ghostAnisotropyStrength", ghostAnisotropyStrength);
+        getDouble("ghostCellGhostStiffness", ghostCellGhostStiffness);
+        getDouble("ghostCellGhostRestLength", ghostCellGhostRestLength);
+        getDouble("ghostCellGhostCutoff", ghostCellGhostCutoff);
+        getDouble("ghostSpringRestLength", ghostSpringRestLength);
+        getDouble("ghostGridSpacing", ghostGridSpacing);
+        getUnsigned("ghostRemovalCheckInterval", ghostRemovalCheckInterval);
+
+        // Viscoelastic ECM
+        getBool("enableViscoelasticECM", enableViscoelasticECM);
+        getDouble("ghostRelaxedStiffness", ghostRelaxedStiffness);
+        getDouble("ghostRelaxationModulus", ghostRelaxationModulus);
+        getDouble("ghostRelaxationTime", ghostRelaxationTime);
+
         if (configMap.count("t1Threshold2d")) { getDouble("t1Threshold2d", t1Threshold2d); t1ThresholdOverridden = true; }
         if (configMap.count("t2Threshold2d")) { getDouble("t2Threshold2d", t2Threshold2d); t2ThresholdOverridden = true; }
 
@@ -622,6 +704,14 @@ struct CryptBuddingParams
 
         getBool("enableGenerationalCascade", enableGenerationalCascade);
         getUnsigned("maxTransitGenerations", maxTransitGenerations);
+
+        getBool("enableStochasticFourType", enableStochasticFourType);
+        getDouble("probStemToStem", probStemToStem);
+        getDouble("probStemToPaneth", probStemToPaneth);
+        getDouble("probTaToTaEarly", probTaToTaEarly);
+        getDouble("probTaToTaLate", probTaToTaLate);
+        getDouble("transitionTime", transitionTime);
+        getDouble("panethFraction", panethFraction);
 
         getDouble("polarityBendingStrength", polarityBendingStrength);
         getDouble("polarityAlignmentStrength", polarityAlignmentStrength);
@@ -713,10 +803,7 @@ struct CryptBuddingParams
         file << "apicalBasalAdhesion = " << apicalBasalAdhesion << "\n\n";
 
         file << "# Lumen pressure\n";
-        file << "lumenPressure = " << lumenPressure << "\n";
-        file << "lumenUseTargetVolume = " << (lumenUseTargetVolume ? "true" : "false") << "   # Incompressible fluid model\n";
-        file << "lumenVolumeGrowthRate = " << lumenVolumeGrowthRate << "   # fraction per hour\n";
-        file << "lumenBulkModulus = " << lumenBulkModulus << "   # fluid stiffness\n\n";
+        file << "lumenPressure = " << lumenPressure << "\n\n";
 
         file << "# Apical constriction\n";
         file << "apicalConstrictionStrength = " << apicalConstrictionStrength << "\n\n";
@@ -766,7 +853,14 @@ struct CryptBuddingParams
         file << "stemCycleMax = " << stemCycleMax << "        # Stem total cycle max (hours)\n";
         file << "taCycleRatio = " << taCycleRatio << "        # TA cycle = ratio * stem (0.5 or 1)\n";
         file << "enableGenerationalCascade = " << (enableGenerationalCascade ? "true" : "false") << "  # Stem→TA→Diff cascade (Meineke 2001)\n";
-        file << "maxTransitGenerations = " << maxTransitGenerations << "       # TA divisions before differentiation\n\n";
+        file << "maxTransitGenerations = " << maxTransitGenerations << "       # TA divisions before differentiation\n";
+        file << "enableStochasticFourType = " << (enableStochasticFourType ? "true" : "false") << "  # Stochastic SC/TA/PC/EC transitions (Montes-Olivas 2023)\n";
+        file << "probStemToStem = " << probStemToStem << "       # P(SC daughter = SC)\n";
+        file << "probStemToPaneth = " << probStemToPaneth << "     # P(SC daughter = PC)\n";
+        file << "probTaToTaEarly = " << probTaToTaEarly << "      # P(TA daughter = TA) days 1-4\n";
+        file << "probTaToTaLate = " << probTaToTaLate << "       # P(TA daughter = TA) days 5-7\n";
+        file << "transitionTime = " << transitionTime << "       # Switch time (hours)\n";
+        file << "panethFraction = " << panethFraction << "       # Initial PC fraction\n\n";
 
         file << "[ECMGuidance]\n";
         file << "ecmDomainHalf = " << ecmDomainHalf << "\n";
@@ -775,7 +869,26 @@ struct CryptBuddingParams
         file << "ecmGridType = " << ecmGridType << "\n";
         file << "ecmSpringRestLength = " << ecmSpringRestLength << "   # Rest length for cell-ECM springs\n";
         file << "ecmInteractionCutoff = " << ecmInteractionCutoff << "  # Cutoff for cell-ECM interactions\n";
-        file << "ecmConfinementStiffness = " << ecmConfinementStiffness << "  # Spring stiffness for cell-ECM agent interactions\n";
+        file << "ecmConfinementStiffness = " << ecmConfinementStiffness << "  # Spring stiffness for cell-ECM agent interactions\n\n";
+
+        file << "[GhostNodeECM]\n";
+        file << "enableGhostNodeECM = " << (enableGhostNodeECM ? "true" : "false") << "  # Use off-lattice ghost node ECM instead of grid-based\n";
+        file << "ghostGhostStiffness = " << ghostGhostStiffness << "         # ECM-ECM spring stiffness\n";
+        file << "ghostDamping = " << ghostDamping << "                # ECM node damping coefficient\n";
+        file << "ghostRemovalThreshold = " << ghostRemovalThreshold << "       # Density below which ghost nodes are removed\n";
+        file << "ghostFibreRemodelingRate = " << ghostFibreRemodelingRate << "    # Fibre reorientation rate\n";
+        file << "ghostAnisotropyStrength = " << ghostAnisotropyStrength << "     # Fibre anisotropy factor [0,1]\n";
+        file << "ghostCellGhostStiffness = " << ghostCellGhostStiffness << "     # Cell-ghost spring stiffness\n";
+        file << "ghostCellGhostRestLength = " << ghostCellGhostRestLength << "    # Cell-ghost spring rest length\n";
+        file << "ghostCellGhostCutoff = " << ghostCellGhostCutoff << "        # Cell-ghost interaction cutoff\n";
+        file << "ghostSpringRestLength = " << ghostSpringRestLength << "       # ECM-ECM spring rest length (-1 = auto)\n";
+        file << "ghostGridSpacing = " << ghostGridSpacing << "            # Ghost node grid spacing (-1 = auto from rest length)\n";
+        file << "ghostRemovalCheckInterval = " << ghostRemovalCheckInterval << "   # Steps between removal checks\n";
+        file << "# Viscoelastic constitutive model (generalised Maxwell)\n";
+        file << "enableViscoelasticECM = " << (enableViscoelasticECM ? "true" : "false") << "  # Use viscoelastic ghost node ECM\n";
+        file << "ghostRelaxedStiffness = " << ghostRelaxedStiffness << "       # E0: relaxed modulus\n";
+        file << "ghostRelaxationModulus = " << ghostRelaxationModulus << "      # E1: transient modulus\n";
+        file << "ghostRelaxationTime = " << ghostRelaxationTime << "          # tau: relaxation time (hours)\n";
 
         file.close();
         std::cout << "Saved parameters to: " << filePath << std::endl;

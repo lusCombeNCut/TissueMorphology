@@ -1,5 +1,9 @@
 # Invasive Front Simulation - Three-Factor Model Application
 
+> **⚠ HISTORICAL DOCUMENT** — Written during early invasion experiments.
+> The invasion tests now use `DynamicECMContactGuidanceForce` (not the older static
+> `ECMContactGuidanceForce`). See `test/Invasion/` for current test code.
+
 ## Overview
 
 This implements Section 3.1 "Invasive Cellular Front Pushing into ECM" from Metzcar et al. 2025, demonstrating how the three-factor morphogenesis framework can be adapted to study tumor invasion.

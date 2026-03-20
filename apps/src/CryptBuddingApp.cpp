@@ -80,10 +80,13 @@ int main(int argc, char* argv[])
 #ifndef TM_GIT_HASH
 #define TM_GIT_HASH "unknown"
 #endif
+                 const double output_stiffness = params.enableGhostNodeECM
+                  ? params.ghostGhostStiffness
+                  : params.ecmConfinementStiffness;
             std::stringstream subdir;
             subdir << "CryptBudding/" << TM_GIT_HASH
                    << "/" << params.modelType
-                   << "/stiffness_" << std::fixed << std::setprecision(1) << params.ecmConfinementStiffness
+                     << "/stiffness_" << std::fixed << std::setprecision(1) << output_stiffness
                    << "/run_" << params.runNumber;
             outputSubdir = subdir.str();
 
