@@ -184,8 +184,6 @@ inline void PrintBanner(const CryptBuddingParams& p)
     std::cout << "  Run Number:     " << p.runNumber << std::endl;
     std::cout << "  Seed:           " << p.randomSeed << std::endl;
     std::cout << "  dt:             " << p.dt << std::endl;
-    if (p.modelType == "vertex3d")
-        std::cout << "  dt (growth):    " << p.dtGrow << std::endl;
     std::cout << "  Relaxation:     " << (p.enableRelaxation ? "ON" : "OFF")
               << " (" << p.relaxationTime << "h)" << std::endl;
     std::cout << "  End Time:       " << p.endTime << "h" << std::endl;
@@ -238,8 +236,9 @@ inline void PrintUsage()
               << "      node3d   - 3D overlapping spheres\n"
               << "      vertex3d - 3D vertex model\n"
               << "\nConfig file (loads parameters without recompiling):\n"
-              << "  -config <file.ini>    Load parameters from INI file\n"
-              << "  -saveconfig <file>    Save current parameters to INI file and exit\n"
+              << "  -config <file.json>   Load parameters from JSON file (recommended)\n"
+              << "  -config <file.ini>    Load parameters from legacy INI file\n"
+              << "  -saveconfig <file>    Save current parameters (.json or .ini) and exit\n"
               << "\nOptions (override config file values):\n"
               << "  -stiffness <double>   ECM stiffness (default: 5.0)\n"
               << "  -run <int>            run/replicate number (default: 0)\n"
@@ -260,8 +259,8 @@ inline void PrintUsage()
               << "  -pressure <double>    lumen pressure strength (default: 1.0)\n"
               << "  -help                 print this message\n"
               << "\nExample:\n"
-              << "  ./CryptBuddingApp -model mesh2d -config params.ini\n"
-              << "  ./CryptBuddingApp -model mesh2d -saveconfig default.ini\n"
+              << "  ./CryptBuddingApp -model node2d -config params-Node2d.json\n"
+              << "  ./CryptBuddingApp -model node2d -saveconfig default.json\n"
               << std::endl;
 }
 
@@ -281,10 +280,15 @@ inline CryptBuddingParams ParseArguments(int argc, char* argv[])
         if (arg == "-config" && i + 1 < argc)
         {
             std::string configFile = argv[++i];
-            if (!p.LoadFromFile(configFile))
-            {
+            bool ok = false;
+            // Dispatch on file extension: .json → JSON loader, anything else → INI loader
+            if (configFile.size() > 5 &&
+                configFile.substr(configFile.size() - 5) == ".json")
+                ok = p.LoadFromJson(configFile);
+            else
+                ok = p.LoadFromFile(configFile);
+            if (!ok)
                 std::cerr << "Warning: Failed to load config file: " << configFile << std::endl;
-            }
             break;  // Only process first -config
         }
     }
@@ -315,7 +319,14 @@ inline CryptBuddingParams ParseArguments(int argc, char* argv[])
                 }
             }
             p.Finalise();
-            p.SaveToFile(argv[++i]);
+            {
+                std::string outFile = argv[++i];
+                if (outFile.size() > 5 &&
+                    outFile.substr(outFile.size() - 5) == ".json")
+                    p.SaveToJson(outFile);
+                else
+                    p.SaveToFile(outFile);
+            }
             std::cout << "Config saved. Exiting." << std::endl;
             exit(0);
         }
@@ -368,10 +379,6 @@ inline CryptBuddingParams ParseArguments(int argc, char* argv[])
         {
             p.dt = std::stod(argv[++i]);
             p.dtOverridden = true;
-        }
-        else if (arg == "-dtgrow" && i + 1 < argc)
-        {
-            p.dtGrow = std::stod(argv[++i]);
         }
         else if (arg == "-continuous-pvd")
         {

@@ -9,7 +9,7 @@
  *
  * Two-phase simulation:
  *   Phase 1: Relaxation at small dt (all cells differentiated, no lumen pressure)
- *   Phase 2: Growth at dtGrow with lumen pressure enabled
+ *   Phase 2: Growth at dt with lumen pressure enabled
  */
 #ifndef RUNVERTEX3D_HPP_
 #define RUNVERTEX3D_HPP_
@@ -424,8 +424,8 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
             if (origTypes.count(*it)) it->SetCellProliferativeType(origTypes[*it]);
         }
 
-        // Phase 2: Growth — use dtGrow (reduced for stability)
-        double dt_grow = p.dtGrow;
+        // Phase 2: Growth
+        double dt_grow = p.dt;
 
         simulator.SetEndTime(p.relaxationTime + p.endTime);
         simulator.SetSamplingTimestepMultiple(p.samplingMultiple);
@@ -510,8 +510,8 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     }
     else
     {
-        // No relaxation — still need to configure growth-phase settings
-        double dt_grow = p.dtGrow;
+        // No relaxation — configure growth-phase settings
+        double dt_grow = p.dt;
 
         simulator.SetEndTime(p.endTime);
         simulator.SetSamplingTimestepMultiple(p.samplingMultiple);

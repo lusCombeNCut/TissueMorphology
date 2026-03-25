@@ -92,8 +92,8 @@ int main(int argc, char* argv[])
 
             // Save a copy of the parameters to the output folder for reference
             OutputFileHandler output_handler(outputSubdir, false);
-            std::string params_path = output_handler.GetOutputDirectoryFullPath() + "params.ini";
-            params.SaveToFile(params_path);
+            std::string params_path = output_handler.GetOutputDirectoryFullPath() + "params.json";
+            params.SaveToJson(params_path);
 
             if (params.modelType == "node2d")
             {

@@ -27,6 +27,7 @@
 #include <sstream>
 #include <iostream>
 #include <map>
+#include <functional>
 
 struct CryptBuddingParams
 {
@@ -47,7 +48,6 @@ struct CryptBuddingParams
     bool enableContinuousPvd;
 
     double dt;
-    double dtGrow;     // Phase 2 growth dt for vertex3d (separate from relaxation dt)
     double relaxationTime;
     double endTime;
     unsigned samplingMultiple;
@@ -152,7 +152,6 @@ struct CryptBuddingParams
     // Curvature bending force (Drasdo 2000 - monolayer enforcement)
     bool enableCurvatureBending;
     double bendingStiffness;
-    double minRadiusFraction;  // cells cannot go below this fraction of target radius
 
     // Spring neighbor strategy for node-based models
     // true  = topology-based (RingSpringForce / SurfaceSpringForce)
@@ -208,7 +207,7 @@ struct CryptBuddingParams
         enableApicalConstriction = true;
         enableEcmGuidance = false;
         enableRelaxation = true;
-        enableSloughing = true;
+        enableSloughing = false;
         enableDifferentialAdhesion = true;
         enableEcmConfinement = true;
         enableLumenHole = true;
@@ -219,7 +218,7 @@ struct CryptBuddingParams
         t2ThresholdOverridden = false;
         endTime = 168.0;
         dt = 0.005;
-        dtGrow = 0.002;   // Phase 2 growth dt for vertex3d (reduced from 0.006 for stability)
+
 
         relaxationTime = 10.0;
 
@@ -284,7 +283,7 @@ struct CryptBuddingParams
         ecmDomainHalf  = -1.0;  // sentinel: auto-derive in Finalise()
         ecmGridSpacing = 10.0;
         ecmBaseSpeed   = 0.3;
-        ecmGridType    = "square";   // "square" or "hex"
+        ecmGridType    = "hex";   // "square" or "hex"
         ecmSpringRestLength      = 0.0;    // Rest length for cell-ECM springs
         ecmInteractionCutoff     = 1.5;    // Cutoff distance for cell-ECM interactions
         ecmConfinementStiffness  = -1.0;   // sentinel: falls back to ecmStiffness in Finalise()
@@ -301,7 +300,7 @@ struct CryptBuddingParams
         ghostCellGhostCutoff        = 1.5;
         ghostSpringRestLength       = -1.0;  // sentinel: auto-derive from grid spacing
         ghostGridSpacing            = -1.0;  // sentinel: defaults to ghostSpringRestLength (or ecmGridSpacing if rest length also unset)
-        ghostRemovalCheckInterval   = 100;
+        ghostRemovalCheckInterval   = 10;
 
         // Viscoelastic ECM (generalised Maxwell model)
         enableViscoelasticECM       = true;
@@ -312,7 +311,6 @@ struct CryptBuddingParams
         // Curvature bending force (Drasdo 2000 - monolayer enforcement)
         enableCurvatureBending    = true;   // Enable by default for node2d
         bendingStiffness          = 5.0;    // Bending rigidity
-        minRadiusFraction         = 0.7;    // Cells stay outside 70% of target radius
 
         // Spring neighbor strategy (node-based models)
         useTopologyBasedSprings   = true;   // true = topology (ring/surface), false = distance threshold
@@ -340,7 +338,7 @@ struct CryptBuddingParams
         panethFraction    = 0.09;           // Initial PC fraction (4-type model)
 
         // Cell polarity (ya||a-style monolayer enforcement)
-        enableCellPolarity          = true;   // Enable by default for node models
+        enableCellPolarity          = false;   // Enable by default for node models
         polarityBendingStrength     = 0.3;    // Epithelial bending force
         polarityAlignmentStrength   = 0.1;    // Tissue polarity alignment
 
@@ -444,45 +442,181 @@ struct CryptBuddingParams
                       << "  BM=" << bmRadius3d << "  ECMmax=" << ecmMaxRadius3d << std::endl;
         }
 
-        // Model-specific T1/T2 thresholds if not overridden by config
-        // WARNING: These are auto-derived from ecmConfinementStiffness. Set t1Threshold2d/t2Threshold2d
-        //          explicitly in your INI file to prevent this override.
-        if (!t1ThresholdOverridden)
-            t1Threshold2d = (ecmConfinementStiffness < 2.0) ? 0.2 : 0.15;
-        if (!t2ThresholdOverridden)
-            t2Threshold2d = 0.05;
-
-        // Model-specific defaults for dt/endTime if not overridden
-        // WARNING: These are auto-derived and will silently override SetDefaults() values.
-        //          Set dt and endTime explicitly in your INI file to prevent this.
-        if (modelType == "node2d")
-        {
-            if (!dtOverridden) dt = 0.005;
-        }
-        else if (modelType == "vertex2d")
-        {
-            if (!dtOverridden)
-                dt = (ecmConfinementStiffness < 1.0) ? 0.0002
-                   : (ecmConfinementStiffness < 5.0) ? 0.0005
-                   :                        0.0005;
-            if (!endTimeOverridden) endTime = 168.0;
-        }
-        else if (modelType == "node3d")
-        {
-            if (!dtOverridden) dt = 0.01;
-            if (!endTimeOverridden) endTime = 168.0;
-        }
-        else if (modelType == "vertex3d")
-        {
-            if (!dtOverridden) dt = 0.0001;
-            if (!endTimeOverridden) endTime = 100.0;
-        }
-
         // Compute samplingMultiple so every simulation outputs exactly 50 frames
         const unsigned totalSteps = static_cast<unsigned>(std::round(endTime / dt));
         samplingMultiple = std::max(1u, totalSteps / 50);
     }
 
+private:
+    /**
+     * Apply a flat key→value map to all parameters.
+     * Used by both LoadFromFile (INI) and LoadFromJson.
+     */
+    void ApplyConfigMap(const std::map<std::string, std::string>& configMap)
+    {
+        auto getBool = [&](const std::string& key, bool& var) {
+            if (configMap.count(key)) {
+                std::string v = configMap.at(key);
+                std::transform(v.begin(), v.end(), v.begin(), ::tolower);
+                var = (v == "true" || v == "1" || v == "yes" || v == "on");
+            }
+        };
+        auto getDouble = [&](const std::string& key, double& var) {
+            if (configMap.count(key)) {
+                try { var = std::stod(configMap.at(key)); }
+                catch (...) { std::cerr << "Warning: Invalid double for " << key << std::endl; }
+            }
+        };
+        auto getUnsigned = [&](const std::string& key, unsigned& var) {
+            if (configMap.count(key)) {
+                try { var = static_cast<unsigned>(std::stoul(configMap.at(key))); }
+                catch (...) { std::cerr << "Warning: Invalid unsigned for " << key << std::endl; }
+            }
+        };
+        auto getString = [&](const std::string& key, std::string& var) {
+            if (configMap.count(key)) var = configMap.at(key);
+        };
+
+        // ── Simulation ───────────────────────────────────────────────
+        getString("modelType", modelType);
+        getDouble("ecmStiffness", ecmStiffness);
+        getUnsigned("runNumber", runNumber);
+        getUnsigned("randomSeed", randomSeed);
+
+        // ── Feature toggles ──────────────────────────────────────────
+        getBool("enableLumenPressure", enableLumenPressure);
+        getBool("enableApicalConstriction", enableApicalConstriction);
+        getBool("enableEcmGuidance", enableEcmGuidance);
+        getBool("enableRelaxation", enableRelaxation);
+        getBool("enableSloughing", enableSloughing);
+        getBool("enableDifferentialAdhesion", enableDifferentialAdhesion);
+        getBool("enableCurvatureBending", enableCurvatureBending);
+        getBool("enableCellPolarity", enableCellPolarity);
+        getBool("enableEcmConfinement", enableEcmConfinement);
+        getBool("enableLumenHole", enableLumenHole);
+        getBool("useTopologyBasedSprings", useTopologyBasedSprings);
+        getBool("enableContinuousPvd", enableContinuousPvd);
+        getBool("enableGhostNodeECM", enableGhostNodeECM);
+        getBool("enableViscoelasticECM", enableViscoelasticECM);
+
+        // ── Time stepping ────────────────────────────────────────────
+        if (configMap.count("dt"))      { getDouble("dt", dt);           dtOverridden = true; }
+        if (configMap.count("endTime")) { getDouble("endTime", endTime); endTimeOverridden = true; }
+        getDouble("relaxationTime", relaxationTime);
+
+        // ── Geometry ─────────────────────────────────────────────────
+        getDouble("organoidRadius2d", organoidRadius2d);
+        getUnsigned("numCells2dNode", numCells2dNode);
+        getUnsigned("numCells2dVertex", numCells2dVertex);
+        getDouble("innerRadius2d", innerRadius2d);
+        getDouble("outerRadius2d", outerRadius2d);
+        getDouble("interactionCutoff2d", interactionCutoff2d);
+
+        getUnsigned("numCells3dNode", numCells3dNode);
+        getUnsigned("numCells3dVertex", numCells3dVertex);
+        getDouble("organoidRadius3d", organoidRadius3d);
+        getDouble("shellThickness3d", shellThickness3d);
+        getDouble("interactionCutoff3d", interactionCutoff3d);
+        getDouble("sphereRadius3dVertex", sphereRadius3dVertex);
+        getDouble("bmOffset3dVertex", bmOffset3dVertex);
+
+        getDouble("bmStiffnessNode", bmStiffnessNode);
+        getDouble("bmStiffnessVertex", bmStiffnessVertex);
+        getDouble("ecmDegradationRate", ecmDegradationRate);
+        getDouble("ecmDiffusionCoeff", ecmDiffusionCoeff);
+
+        getDouble("bmRadiusFraction", bmRadiusFraction);
+        getDouble("ecmMaxRadiusFraction", ecmMaxRadiusFraction);
+
+        // ── Forces ───────────────────────────────────────────────────
+        getDouble("lumenPressure", lumenPressure);
+        getDouble("apicalConstrictionStrength", apicalConstrictionStrength);
+
+        getDouble("springStiffness", springStiffness);
+        getDouble("springCutoff", springCutoff);
+        getDouble("springStiffnessTAScale", springStiffnessTAScale);
+        getDouble("springStiffnessDiffScale", springStiffnessDiffScale);
+        getDouble("apicalApicalAdhesion", apicalApicalAdhesion);
+        getDouble("basalBasalAdhesion", basalBasalAdhesion);
+        getDouble("apicalBasalAdhesion", apicalBasalAdhesion);
+
+        getDouble("nhMembraneSurface", nhMembraneSurface);
+        getDouble("nhCellCellAdhesion", nhCellCellAdhesion);
+        getDouble("nhBoundaryAdhesion", nhBoundaryAdhesion);
+        getDouble("nhStemStemAdhesion", nhStemStemAdhesion);
+        getDouble("nhStemTransitAdhesion", nhStemTransitAdhesion);
+        getDouble("nhStemDiffAdhesion", nhStemDiffAdhesion);
+        getDouble("nhTransitTransitAdhesion", nhTransitTransitAdhesion);
+        getDouble("nhTransitDiffAdhesion", nhTransitDiffAdhesion);
+        getDouble("nhDiffDiffAdhesion", nhDiffDiffAdhesion);
+        getDouble("nhStemBoundaryAdhesion", nhStemBoundaryAdhesion);
+        getDouble("nhTransitBoundaryAdhesion", nhTransitBoundaryAdhesion);
+        getDouble("nhDiffBoundaryAdhesion", nhDiffBoundaryAdhesion);
+
+        getDouble("gammaApical", gammaApical);
+        getDouble("gammaBasal", gammaBasal);
+        getDouble("gammaLateral", gammaLateral);
+        getDouble("gammaStemScale", gammaStemScale);
+        getDouble("gammaTransitScale", gammaTransitScale);
+        getDouble("gammaDiffScale", gammaDiffScale);
+
+        getDouble("bendingStiffness", bendingStiffness);
+        getDouble("polarityBendingStrength", polarityBendingStrength);
+        getDouble("polarityAlignmentStrength", polarityAlignmentStrength);
+
+        // ── ECM confinement ──────────────────────────────────────────
+        getDouble("ecmDomainHalf", ecmDomainHalf);
+        getDouble("ecmGridSpacing", ecmGridSpacing);
+        getDouble("ecmBaseSpeed", ecmBaseSpeed);
+        getString("ecmGridType", ecmGridType);
+        getDouble("ecmSpringRestLength", ecmSpringRestLength);
+        getDouble("ecmInteractionCutoff", ecmInteractionCutoff);
+        getDouble("ecmConfinementStiffness", ecmConfinementStiffness);
+
+        // ── Ghost node ECM ───────────────────────────────────────────
+        getDouble("ghostGhostStiffness", ghostGhostStiffness);
+        getDouble("ghostDamping", ghostDamping);
+        getDouble("ghostRemovalThreshold", ghostRemovalThreshold);
+        getDouble("ghostFibreRemodelingRate", ghostFibreRemodelingRate);
+        getDouble("ghostAnisotropyStrength", ghostAnisotropyStrength);
+        getDouble("ghostCellGhostStiffness", ghostCellGhostStiffness);
+        getDouble("ghostCellGhostRestLength", ghostCellGhostRestLength);
+        getDouble("ghostCellGhostCutoff", ghostCellGhostCutoff);
+        getDouble("ghostSpringRestLength", ghostSpringRestLength);
+        getDouble("ghostGridSpacing", ghostGridSpacing);
+        getUnsigned("ghostRemovalCheckInterval", ghostRemovalCheckInterval);
+
+        // ── Viscoelastic ECM ─────────────────────────────────────────
+        getDouble("ghostRelaxedStiffness", ghostRelaxedStiffness);
+        getDouble("ghostRelaxationModulus", ghostRelaxationModulus);
+        getDouble("ghostRelaxationTime", ghostRelaxationTime);
+
+        // ── Vertex mesh thresholds ───────────────────────────────────
+        if (configMap.count("t1Threshold2d")) { getDouble("t1Threshold2d", t1Threshold2d); t1ThresholdOverridden = true; }
+        if (configMap.count("t2Threshold2d")) { getDouble("t2Threshold2d", t2Threshold2d); t2ThresholdOverridden = true; }
+
+        // ── Cell types & cycle ───────────────────────────────────────
+        getDouble("stemFraction", stemFraction);
+        getDouble("transitFraction", transitFraction);
+        getDouble("quiescentFraction", quiescentFraction);
+        getDouble("sloughRadiusFactor", sloughRadiusFactor);
+        getDouble("stemCycleMin", stemCycleMin);
+        getDouble("stemCycleMax", stemCycleMax);
+        getDouble("taCycleRatio", taCycleRatio);
+
+        getBool("enableGenerationalCascade", enableGenerationalCascade);
+        getUnsigned("maxTransitGenerations", maxTransitGenerations);
+
+        getBool("enableStochasticFourType", enableStochasticFourType);
+        getDouble("probStemToStem", probStemToStem);
+        getDouble("probStemToPaneth", probStemToPaneth);
+        getDouble("probTaToTaEarly", probTaToTaEarly);
+        getDouble("probTaToTaLate", probTaToTaLate);
+        getDouble("transitionTime", transitionTime);
+        getDouble("panethFraction", panethFraction);
+    }
+
+public:
     /**
      * Load parameters from an INI-style config file.
      * File format:
@@ -549,170 +683,110 @@ struct CryptBuddingParams
 
         file.close();
 
-        // Helper lambdas to parse values
-        auto getBool = [&](const std::string& key, bool& var) {
-            if (configMap.count(key)) {
-                std::string v = configMap[key];
-                std::transform(v.begin(), v.end(), v.begin(), ::tolower);
-                var = (v == "true" || v == "1" || v == "yes" || v == "on");
+        ApplyConfigMap(configMap);
+        std::cout << "Loaded " << configMap.size() << " parameters from: " << filePath << std::endl;
+        return true;
+    }
+
+    /**
+     * Load parameters from a JSON config file.
+     * The JSON uses a nested hierarchy (simulation/features/geometry/forces/...)
+     * for clarity, but all leaf key names match the flat parameter names used
+     * throughout the codebase. Object nesting is ignored during parsing —
+     * only the innermost key→value pairs are applied.
+     *
+     * Only parameters present in the file are overwritten; others keep defaults.
+     * Returns true if file was loaded successfully.
+     */
+    bool LoadFromJson(const std::string& filePath)
+    {
+        std::ifstream ifs(filePath);
+        if (!ifs.is_open())
+        {
+            std::cerr << "Warning: Could not open JSON config file: " << filePath << std::endl;
+            return false;
+        }
+        const std::string content((std::istreambuf_iterator<char>(ifs)),
+                                   std::istreambuf_iterator<char>());
+        ifs.close();
+
+        // ── Minimal recursive-descent JSON parser ─────────────────────
+        // Flattens all leaf (scalar) key→value pairs from any nesting depth
+        // into a single map. Object-level keys (e.g. "forces", "SpringForce")
+        // are skipped; only leaf values reach the map.
+        std::map<std::string, std::string> configMap;
+        size_t pos = 0;
+
+        auto skipWs = [&]() {
+            while (pos < content.size() &&
+                   (content[pos]==' ' || content[pos]=='\t' ||
+                    content[pos]=='\n' || content[pos]=='\r'))
+                ++pos;
+        };
+
+        std::function<std::string()> parseString = [&]() -> std::string {
+            ++pos; // skip opening "
+            std::string result;
+            while (pos < content.size() && content[pos] != '"')
+            {
+                if (content[pos] == '\\' && pos + 1 < content.size())
+                    { ++pos; result += content[pos++]; }
+                else
+                    result += content[pos++];
+            }
+            if (pos < content.size()) ++pos; // skip closing "
+            return result;
+        };
+
+        std::function<void()> parseObject = [&]() {
+            skipWs();
+            if (pos < content.size() && content[pos] == '{') ++pos;
+            while (true)
+            {
+                skipWs();
+                if (pos >= content.size() || content[pos] == '}')
+                    { if (pos < content.size()) ++pos; break; }
+                if (content[pos] == ',') { ++pos; continue; }
+                if (content[pos] != '"') { ++pos; continue; } // malformed
+
+                const std::string key = parseString();
+                skipWs();
+                if (pos < content.size() && content[pos] == ':') ++pos;
+                skipWs();
+
+                if (pos < content.size() && content[pos] == '{')
+                {
+                    parseObject(); // recurse — leaf keys bubble up into configMap
+                }
+                else
+                {
+                    std::string value;
+                    if (pos < content.size() && content[pos] == '"')
+                    {
+                        value = parseString();
+                    }
+                    else
+                    {
+                        const size_t start = pos;
+                        while (pos < content.size() &&
+                               content[pos] != ',' && content[pos] != '}' &&
+                               content[pos] != '\n' && content[pos] != '\r')
+                            ++pos;
+                        value = content.substr(start, pos - start);
+                        const size_t end = value.find_last_not_of(" \t");
+                        value = (end == std::string::npos) ? "" : value.substr(0, end + 1);
+                    }
+                    if (!key.empty() && !value.empty() && value != "null")
+                        configMap[key] = value;
+                }
             }
         };
-        auto getDouble = [&](const std::string& key, double& var) {
-            if (configMap.count(key)) {
-                try { var = std::stod(configMap[key]); }
-                catch (...) { std::cerr << "Warning: Invalid double for " << key << std::endl; }
-            }
-        };
-        auto getUnsigned = [&](const std::string& key, unsigned& var) {
-            if (configMap.count(key)) {
-                try { var = static_cast<unsigned>(std::stoul(configMap[key])); }
-                catch (...) { std::cerr << "Warning: Invalid unsigned for " << key << std::endl; }
-            }
-        };
-        auto getString = [&](const std::string& key, std::string& var) {
-            if (configMap.count(key)) var = configMap[key];
-        };
 
-        // Apply all parameters from config
-        getString("modelType", modelType);
-        getDouble("ecmStiffness", ecmStiffness);
-        getUnsigned("runNumber", runNumber);
-        getUnsigned("randomSeed", randomSeed);
+        skipWs();
+        parseObject();
+        // ─────────────────────────────────────────────────────────────
 
-        getBool("enableLumenPressure", enableLumenPressure);
-        getBool("enableApicalConstriction", enableApicalConstriction);
-        getBool("enableEcmGuidance", enableEcmGuidance);
-        getBool("enableRelaxation", enableRelaxation);
-        getBool("enableSloughing", enableSloughing);
-        getBool("enableDifferentialAdhesion", enableDifferentialAdhesion);
-        getBool("enableCurvatureBending", enableCurvatureBending);
-        getBool("enableCellPolarity", enableCellPolarity);
-        getBool("enableEcmConfinement", enableEcmConfinement);
-        getBool("enableLumenHole", enableLumenHole);
-        getBool("useTopologyBasedSprings", useTopologyBasedSprings);
-        getBool("enableContinuousPvd", enableContinuousPvd);
-        getBool("enableGhostNodeECM", enableGhostNodeECM);
-
-        if (configMap.count("dt")) { getDouble("dt", dt); dtOverridden = true; }
-        if (configMap.count("endTime")) { getDouble("endTime", endTime); endTimeOverridden = true; }
-        getDouble("dtGrow", dtGrow);
-        getDouble("relaxationTime", relaxationTime);
-
-        getDouble("organoidRadius2d", organoidRadius2d);
-        getUnsigned("numCells2dNode", numCells2dNode);
-        getUnsigned("numCells2dVertex", numCells2dVertex);
-        getDouble("innerRadius2d", innerRadius2d);
-        getDouble("outerRadius2d", outerRadius2d);
-        getDouble("interactionCutoff2d", interactionCutoff2d);
-
-        getUnsigned("numCells3dNode", numCells3dNode);
-        getUnsigned("numCells3dVertex", numCells3dVertex);
-        getDouble("organoidRadius3d", organoidRadius3d);
-        getDouble("shellThickness3d", shellThickness3d);
-        getDouble("interactionCutoff3d", interactionCutoff3d);
-        getDouble("sphereRadius3dVertex", sphereRadius3dVertex);
-        getDouble("bmOffset3dVertex", bmOffset3dVertex);
-
-        getDouble("bmStiffnessNode", bmStiffnessNode);
-        getDouble("bmStiffnessVertex", bmStiffnessVertex);
-        getDouble("ecmDegradationRate", ecmDegradationRate);
-        getDouble("ecmDiffusionCoeff", ecmDiffusionCoeff);
-
-        // Radius fractions (absolute radii derived in Finalise)
-        getDouble("bmRadiusFraction", bmRadiusFraction);
-        getDouble("ecmMaxRadiusFraction", ecmMaxRadiusFraction);
-
-        getDouble("lumenPressure", lumenPressure);
-
-        getDouble("apicalConstrictionStrength", apicalConstrictionStrength);
-
-        getDouble("springStiffness", springStiffness);
-        getDouble("springCutoff", springCutoff);
-        getDouble("springStiffnessTAScale", springStiffnessTAScale);
-        getDouble("springStiffnessDiffScale", springStiffnessDiffScale);
-        getDouble("apicalApicalAdhesion", apicalApicalAdhesion);
-        getDouble("basalBasalAdhesion", basalBasalAdhesion);
-        getDouble("apicalBasalAdhesion", apicalBasalAdhesion);
-
-        getDouble("nhMembraneSurface", nhMembraneSurface);
-        getDouble("nhCellCellAdhesion", nhCellCellAdhesion);
-        getDouble("nhBoundaryAdhesion", nhBoundaryAdhesion);
-
-        // Per-type adhesion (override defaults if present)
-        getDouble("nhStemStemAdhesion", nhStemStemAdhesion);
-        getDouble("nhStemTransitAdhesion", nhStemTransitAdhesion);
-        getDouble("nhStemDiffAdhesion", nhStemDiffAdhesion);
-        getDouble("nhTransitTransitAdhesion", nhTransitTransitAdhesion);
-        getDouble("nhTransitDiffAdhesion", nhTransitDiffAdhesion);
-        getDouble("nhDiffDiffAdhesion", nhDiffDiffAdhesion);
-        getDouble("nhStemBoundaryAdhesion", nhStemBoundaryAdhesion);
-        getDouble("nhTransitBoundaryAdhesion", nhTransitBoundaryAdhesion);
-        getDouble("nhDiffBoundaryAdhesion", nhDiffBoundaryAdhesion);
-
-        getDouble("gammaApical", gammaApical);
-        getDouble("gammaBasal", gammaBasal);
-        getDouble("gammaLateral", gammaLateral);
-        getDouble("gammaStemScale", gammaStemScale);
-        getDouble("gammaTransitScale", gammaTransitScale);
-        getDouble("gammaDiffScale", gammaDiffScale);
-
-        getDouble("quiescentFraction", quiescentFraction);
-        getDouble("sloughRadiusFactor", sloughRadiusFactor);
-
-        getDouble("ecmDomainHalf", ecmDomainHalf);
-        getDouble("ecmGridSpacing", ecmGridSpacing);
-        getDouble("ecmBaseSpeed", ecmBaseSpeed);
-        getString("ecmGridType", ecmGridType);
-        getDouble("ecmSpringRestLength", ecmSpringRestLength);
-        getDouble("ecmInteractionCutoff", ecmInteractionCutoff);
-        getDouble("ecmConfinementStiffness", ecmConfinementStiffness);
-
-        // Ghost node ECM parameters
-        getDouble("ghostGhostStiffness", ghostGhostStiffness);
-        getDouble("ghostDamping", ghostDamping);
-        getDouble("ghostRemovalThreshold", ghostRemovalThreshold);
-        getDouble("ghostFibreRemodelingRate", ghostFibreRemodelingRate);
-        getDouble("ghostAnisotropyStrength", ghostAnisotropyStrength);
-        getDouble("ghostCellGhostStiffness", ghostCellGhostStiffness);
-        getDouble("ghostCellGhostRestLength", ghostCellGhostRestLength);
-        getDouble("ghostCellGhostCutoff", ghostCellGhostCutoff);
-        getDouble("ghostSpringRestLength", ghostSpringRestLength);
-        getDouble("ghostGridSpacing", ghostGridSpacing);
-        getUnsigned("ghostRemovalCheckInterval", ghostRemovalCheckInterval);
-
-        // Viscoelastic ECM
-        getBool("enableViscoelasticECM", enableViscoelasticECM);
-        getDouble("ghostRelaxedStiffness", ghostRelaxedStiffness);
-        getDouble("ghostRelaxationModulus", ghostRelaxationModulus);
-        getDouble("ghostRelaxationTime", ghostRelaxationTime);
-
-        if (configMap.count("t1Threshold2d")) { getDouble("t1Threshold2d", t1Threshold2d); t1ThresholdOverridden = true; }
-        if (configMap.count("t2Threshold2d")) { getDouble("t2Threshold2d", t2Threshold2d); t2ThresholdOverridden = true; }
-
-        getDouble("bendingStiffness", bendingStiffness);
-        getDouble("minRadiusFraction", minRadiusFraction);
-
-        getDouble("stemFraction", stemFraction);
-        getDouble("transitFraction", transitFraction);
-
-        getDouble("stemCycleMin", stemCycleMin);
-        getDouble("stemCycleMax", stemCycleMax);
-        getDouble("taCycleRatio", taCycleRatio);
-
-        getBool("enableGenerationalCascade", enableGenerationalCascade);
-        getUnsigned("maxTransitGenerations", maxTransitGenerations);
-
-        getBool("enableStochasticFourType", enableStochasticFourType);
-        getDouble("probStemToStem", probStemToStem);
-        getDouble("probStemToPaneth", probStemToPaneth);
-        getDouble("probTaToTaEarly", probTaToTaEarly);
-        getDouble("probTaToTaLate", probTaToTaLate);
-        getDouble("transitionTime", transitionTime);
-        getDouble("panethFraction", panethFraction);
-
-        getDouble("polarityBendingStrength", polarityBendingStrength);
-        getDouble("polarityAlignmentStrength", polarityAlignmentStrength);
-
+        ApplyConfigMap(configMap);
         std::cout << "Loaded " << configMap.size() << " parameters from: " << filePath << std::endl;
         return true;
     }
@@ -737,7 +811,6 @@ struct CryptBuddingParams
         file << "modelType = " << modelType << "\n";
         file << "endTime = " << endTime << "          # Total simulation time (hours)\n";
         file << "dt = " << dt << "              # Time step\n";
-        file << "dtGrow = " << dtGrow << "          # Growth phase dt (vertex3d)\n";
         file << "relaxationTime = " << relaxationTime << "    # Relaxation phase duration\n";
         file << "runNumber = " << runNumber << "\n";
         file << "randomSeed = " << randomSeed << "\n\n";
@@ -806,8 +879,7 @@ struct CryptBuddingParams
         file << "apicalConstrictionStrength = " << apicalConstrictionStrength << "\n\n";
 
         file << "# Curvature bending (Drasdo 2000 - monolayer enforcement)\n";
-        file << "bendingStiffness = " << bendingStiffness << "\n";
-        file << "minRadiusFraction = " << minRadiusFraction << "   # Cells stay outside this fraction of target radius\n\n";
+        file << "bendingStiffness = " << bendingStiffness << "\n\n";
 
         file << "# Cell polarity (ya||a-style monolayer enforcement)\n";
         file << "polarityBendingStrength = " << polarityBendingStrength << "    # Epithelial bending force\n";
@@ -887,6 +959,187 @@ struct CryptBuddingParams
         file << "ghostRelaxationTime = " << ghostRelaxationTime << "          # tau: relaxation time (hours)\n";
 
         file.close();
+        std::cout << "Saved parameters to: " << filePath << std::endl;
+        return true;
+    }
+
+    /**
+     * Save current parameters to a hierarchical JSON config file.
+     * Parameters are grouped by the force/subsystem they belong to,
+     * mirroring the structure of the hand-authored JSON param files.
+     */
+    bool SaveToJson(const std::string& filePath) const
+    {
+        std::ofstream f(filePath);
+        if (!f.is_open())
+        {
+            std::cerr << "Error: Could not write JSON config file: " << filePath << std::endl;
+            return false;
+        }
+
+        auto b = [](bool v) -> const char* { return v ? "true" : "false"; };
+
+        f << "{\n";
+
+        // ── Simulation ───────────────────────────────────────────────
+        f << "  \"simulation\": {\n";
+        f << "    \"modelType\": \"" << modelType << "\",\n";
+        f << "    \"endTime\": " << endTime << ",\n";
+        f << "    \"dt\": " << dt << ",\n";
+        f << "    \"relaxationTime\": " << relaxationTime << ",\n";
+        f << "    \"runNumber\": " << runNumber << ",\n";
+        f << "    \"randomSeed\": " << randomSeed << "\n";
+        f << "  },\n";
+
+        // ── Feature toggles ──────────────────────────────────────────
+        f << "  \"features\": {\n";
+        f << "    \"enableLumenPressure\": " << b(enableLumenPressure) << ",\n";
+        f << "    \"enableApicalConstriction\": " << b(enableApicalConstriction) << ",\n";
+        f << "    \"enableEcmGuidance\": " << b(enableEcmGuidance) << ",\n";
+        f << "    \"enableRelaxation\": " << b(enableRelaxation) << ",\n";
+        f << "    \"enableSloughing\": " << b(enableSloughing) << ",\n";
+        f << "    \"enableDifferentialAdhesion\": " << b(enableDifferentialAdhesion) << ",\n";
+        f << "    \"enableCurvatureBending\": " << b(enableCurvatureBending) << ",\n";
+        f << "    \"enableCellPolarity\": " << b(enableCellPolarity) << ",\n";
+        f << "    \"enableEcmConfinement\": " << b(enableEcmConfinement) << ",\n";
+        f << "    \"enableLumenHole\": " << b(enableLumenHole) << ",\n";
+        f << "    \"enableGhostNodeECM\": " << b(enableGhostNodeECM) << ",\n";
+        f << "    \"enableViscoelasticECM\": " << b(enableViscoelasticECM) << ",\n";
+        f << "    \"enableContinuousPvd\": " << b(enableContinuousPvd) << ",\n";
+        f << "    \"useTopologyBasedSprings\": " << b(useTopologyBasedSprings) << "\n";
+        f << "  },\n";
+
+        // ── Geometry ─────────────────────────────────────────────────
+        f << "  \"geometry\": {\n";
+        f << "    \"numCells2dNode\": " << numCells2dNode << ",\n";
+        f << "    \"numCells2dVertex\": " << numCells2dVertex << ",\n";
+        f << "    \"interactionCutoff2d\": " << interactionCutoff2d << ",\n";
+        f << "    \"t1Threshold2d\": " << t1Threshold2d << ",\n";
+        f << "    \"t2Threshold2d\": " << t2Threshold2d << ",\n";
+        f << "    \"numCells3dNode\": " << numCells3dNode << ",\n";
+        f << "    \"numCells3dVertex\": " << numCells3dVertex << ",\n";
+        f << "    \"shellThickness3d\": " << shellThickness3d << ",\n";
+        f << "    \"interactionCutoff3d\": " << interactionCutoff3d << ",\n";
+        f << "    \"bmOffset3dVertex\": " << bmOffset3dVertex << "\n";
+        f << "  },\n";
+
+        // ── Forces ───────────────────────────────────────────────────
+        f << "  \"forces\": {\n";
+
+        f << "    \"SpringForce\": {\n";
+        f << "      \"springStiffness\": " << springStiffness << ",\n";
+        f << "      \"springCutoff\": " << springCutoff << ",\n";
+        f << "      \"springStiffnessTAScale\": " << springStiffnessTAScale << ",\n";
+        f << "      \"springStiffnessDiffScale\": " << springStiffnessDiffScale << "\n";
+        f << "    },\n";
+
+        f << "    \"LumenPressureForce\": {\n";
+        f << "      \"lumenPressure\": " << lumenPressure << "\n";
+        f << "    },\n";
+
+        f << "    \"ApicalConstrictionForce\": {\n";
+        f << "      \"apicalConstrictionStrength\": " << apicalConstrictionStrength << "\n";
+        f << "    },\n";
+
+        f << "    \"RingSmoothingForce\": {\n";
+        f << "      \"bendingStiffness\": " << bendingStiffness << ",\n";
+        f << "      \"gammaStemScale\": " << gammaStemScale << ",\n";
+        f << "      \"gammaTransitScale\": " << gammaTransitScale << ",\n";
+        f << "      \"gammaDiffScale\": " << gammaDiffScale << "\n";
+        f << "    },\n";
+
+        f << "    \"CellPolarityForce\": {\n";
+        f << "      \"polarityBendingStrength\": " << polarityBendingStrength << ",\n";
+        f << "      \"polarityAlignmentStrength\": " << polarityAlignmentStrength << "\n";
+        f << "    },\n";
+
+        f << "    \"ECMConfinementForce\": {\n";
+        f << "      \"ecmStiffness\": " << ecmStiffness << ",\n";
+        f << "      \"ecmSpringRestLength\": " << ecmSpringRestLength << ",\n";
+        f << "      \"ecmInteractionCutoff\": " << ecmInteractionCutoff << ",\n";
+        f << "      \"bmRadiusFraction\": " << bmRadiusFraction << ",\n";
+        f << "      \"ecmMaxRadiusFraction\": " << ecmMaxRadiusFraction << ",\n";
+        f << "      \"ecmDomainHalf\": " << ecmDomainHalf << ",\n";
+        f << "      \"ecmGridSpacing\": " << ecmGridSpacing << ",\n";
+        f << "      \"ecmGridType\": \"" << ecmGridType << "\",\n";
+        f << "      \"ecmDegradationRate\": " << ecmDegradationRate << ",\n";
+        f << "      \"ecmDiffusionCoeff\": " << ecmDiffusionCoeff << "\n";
+        f << "    },\n";
+
+        f << "    \"ECMGuidanceForce\": {\n";
+        f << "      \"ecmBaseSpeed\": " << ecmBaseSpeed << "\n";
+        f << "    },\n";
+
+        f << "    \"GhostNodeECM\": {\n";
+        f << "      \"ghostDamping\": " << ghostDamping << ",\n";
+        f << "      \"ghostRemovalThreshold\": " << ghostRemovalThreshold << ",\n";
+        f << "      \"ghostFibreRemodelingRate\": " << ghostFibreRemodelingRate << ",\n";
+        f << "      \"ghostAnisotropyStrength\": " << ghostAnisotropyStrength << ",\n";
+        f << "      \"ghostCellGhostRestLength\": " << ghostCellGhostRestLength << ",\n";
+        f << "      \"ghostCellGhostCutoff\": " << ghostCellGhostCutoff << ",\n";
+        f << "      \"ghostSpringRestLength\": " << ghostSpringRestLength << ",\n";
+        f << "      \"ghostGridSpacing\": " << ghostGridSpacing << ",\n";
+        f << "      \"ghostRemovalCheckInterval\": " << ghostRemovalCheckInterval << ",\n";
+        f << "      \"ViscoelasticECM\": {\n";
+        f << "        \"ghostRelaxedStiffness\": " << ghostRelaxedStiffness << ",\n";
+        f << "        \"ghostRelaxationModulus\": " << ghostRelaxationModulus << ",\n";
+        f << "        \"ghostRelaxationTime\": " << ghostRelaxationTime << "\n";
+        f << "      }\n";
+        f << "    },\n";
+
+        f << "    \"NagaiHondaForce\": {\n";
+        f << "      \"nhMembraneSurface\": " << nhMembraneSurface << ",\n";
+        f << "      \"nhCellCellAdhesion\": " << nhCellCellAdhesion << ",\n";
+        f << "      \"nhBoundaryAdhesion\": " << nhBoundaryAdhesion << ",\n";
+        f << "      \"nhStemStemAdhesion\": " << nhStemStemAdhesion << ",\n";
+        f << "      \"nhStemTransitAdhesion\": " << nhStemTransitAdhesion << ",\n";
+        f << "      \"nhStemDiffAdhesion\": " << nhStemDiffAdhesion << ",\n";
+        f << "      \"nhTransitTransitAdhesion\": " << nhTransitTransitAdhesion << ",\n";
+        f << "      \"nhTransitDiffAdhesion\": " << nhTransitDiffAdhesion << ",\n";
+        f << "      \"nhDiffDiffAdhesion\": " << nhDiffDiffAdhesion << ",\n";
+        f << "      \"nhStemBoundaryAdhesion\": " << nhStemBoundaryAdhesion << ",\n";
+        f << "      \"nhTransitBoundaryAdhesion\": " << nhTransitBoundaryAdhesion << ",\n";
+        f << "      \"nhDiffBoundaryAdhesion\": " << nhDiffBoundaryAdhesion << ",\n";
+        f << "      \"gammaApical\": " << gammaApical << ",\n";
+        f << "      \"gammaBasal\": " << gammaBasal << ",\n";
+        f << "      \"gammaLateral\": " << gammaLateral << "\n";
+        f << "    },\n";
+
+        f << "    \"DifferentialAdhesionForce\": {\n";
+        f << "      \"apicalApicalAdhesion\": " << apicalApicalAdhesion << ",\n";
+        f << "      \"basalBasalAdhesion\": " << basalBasalAdhesion << ",\n";
+        f << "      \"apicalBasalAdhesion\": " << apicalBasalAdhesion << "\n";
+        f << "    }\n";
+
+        f << "  },\n";
+
+        // ── Cell types ───────────────────────────────────────────────
+        f << "  \"cellTypes\": {\n";
+        f << "    \"stemFraction\": " << stemFraction << ",\n";
+        f << "    \"transitFraction\": " << transitFraction << "\n";
+        f << "  },\n";
+
+        // ── Cell cycle ───────────────────────────────────────────────
+        f << "  \"cellCycle\": {\n";
+        f << "    \"quiescentFraction\": " << quiescentFraction << ",\n";
+        f << "    \"sloughRadiusFactor\": " << sloughRadiusFactor << ",\n";
+        f << "    \"stemCycleMin\": " << stemCycleMin << ",\n";
+        f << "    \"stemCycleMax\": " << stemCycleMax << ",\n";
+        f << "    \"taCycleRatio\": " << taCycleRatio << ",\n";
+        f << "    \"StochasticFourTypeModel\": {\n";
+        f << "      \"enableStochasticFourType\": " << b(enableStochasticFourType) << ",\n";
+        f << "      \"enableGenerationalCascade\": " << b(enableGenerationalCascade) << ",\n";
+        f << "      \"probStemToStem\": " << probStemToStem << ",\n";
+        f << "      \"probStemToPaneth\": " << probStemToPaneth << ",\n";
+        f << "      \"probTaToTaEarly\": " << probTaToTaEarly << ",\n";
+        f << "      \"probTaToTaLate\": " << probTaToTaLate << ",\n";
+        f << "      \"transitionTime\": " << transitionTime << ",\n";
+        f << "      \"panethFraction\": " << panethFraction << "\n";
+        f << "    }\n";
+        f << "  }\n";
+
+        f << "}\n";
+        f.close();
         std::cout << "Saved parameters to: " << filePath << std::endl;
         return true;
     }
