@@ -152,7 +152,6 @@ struct CryptBuddingParams
     // Curvature bending force (Drasdo 2000 - monolayer enforcement)
     bool enableCurvatureBending;
     double bendingStiffness;
-    double lumenExclusionStrength;
     double minRadiusFraction;  // cells cannot go below this fraction of target radius
 
     // Spring neighbor strategy for node-based models
@@ -291,7 +290,7 @@ struct CryptBuddingParams
         ecmConfinementStiffness  = -1.0;   // sentinel: falls back to ecmStiffness in Finalise()
 
         // Ghost node ECM defaults
-        enableGhostNodeECM          = false;
+        enableGhostNodeECM          = true;
         ghostGhostStiffness         = 15.0;
         ghostDamping                = 5.0;
         ghostRemovalThreshold       = 0.05;
@@ -305,7 +304,7 @@ struct CryptBuddingParams
         ghostRemovalCheckInterval   = 100;
 
         // Viscoelastic ECM (generalised Maxwell model)
-        enableViscoelasticECM       = false;
+        enableViscoelasticECM       = true;
         ghostRelaxedStiffness       = 5.0;    // E0: long-time modulus
         ghostRelaxationModulus      = 1.0;    // E1: transient modulus
         ghostRelaxationTime         = 1.0;    // tau: relaxation time (hours)
@@ -313,7 +312,6 @@ struct CryptBuddingParams
         // Curvature bending force (Drasdo 2000 - monolayer enforcement)
         enableCurvatureBending    = true;   // Enable by default for node2d
         bendingStiffness          = 5.0;    // Bending rigidity
-        lumenExclusionStrength    = 500.0;   // Strong repulsion from lumen interior
         minRadiusFraction         = 0.7;    // Cells stay outside 70% of target radius
 
         // Spring neighbor strategy (node-based models)
@@ -329,11 +327,11 @@ struct CryptBuddingParams
         taCycleRatio  = 0.5;    // TA cycle = ratio × stem cycle (set 0.5 for half)
 
         // Generational cascade (Meineke et al. 2001)
-        enableGenerationalCascade = true;   // Enable Stem → TA → Differentiated cascade
+        enableGenerationalCascade = false;  // Disabled by default (uses stochastic 4-type model)
         maxTransitGenerations = 3;          // TA cells differentiate after 3 divisions
 
         // Stochastic 4-type cell cycle (Montes-Olivas et al. 2023)
-        enableStochasticFourType = false;   // Disabled by default (uses generational cascade)
+        enableStochasticFourType = true;    // Default: stochastic SC/TA/Paneth/EC fate model
         probStemToStem    = 0.89;           // P(SC daughter = SC)
         probStemToPaneth  = 0.09;           // P(SC daughter = PC)
         probTaToTaEarly   = 0.9;            // P(TA daughter = TA) days 1-4
@@ -692,7 +690,6 @@ struct CryptBuddingParams
         if (configMap.count("t2Threshold2d")) { getDouble("t2Threshold2d", t2Threshold2d); t2ThresholdOverridden = true; }
 
         getDouble("bendingStiffness", bendingStiffness);
-        getDouble("lumenExclusionStrength", lumenExclusionStrength);
         getDouble("minRadiusFraction", minRadiusFraction);
 
         getDouble("stemFraction", stemFraction);
@@ -810,7 +807,6 @@ struct CryptBuddingParams
 
         file << "# Curvature bending (Drasdo 2000 - monolayer enforcement)\n";
         file << "bendingStiffness = " << bendingStiffness << "\n";
-        file << "lumenExclusionStrength = " << lumenExclusionStrength << "\n";
         file << "minRadiusFraction = " << minRadiusFraction << "   # Cells stay outside this fraction of target radius\n\n";
 
         file << "# Cell polarity (ya||a-style monolayer enforcement)\n";

@@ -14,9 +14,9 @@
  * Constitutive model (Fertala et al. 2025):
  *   E(t) = E_0 + E_1 * exp(-t/tau)
  *
- * Discrete analogue via per-pair rest length evolution:
- *   F_ij   = (E_0 + E_1) * (d_ij - s_ij)
- *   ds/dt  = (d_ij - s_ij) / tau
+ * Discrete SLS analogue via split-force + exact exponential integrator:
+ *   F_ij = E_0*(d_ij - s0_ij) + E_1*(d_ij - s_ij(t))
+ *   s_ij^{n+1} = d_ij + (s_ij^n - d_ij) * exp(-dt/tau)
  */
 #ifndef VISCOELASTICGHOSTNODEECMFORCE_HPP_
 #define VISCOELASTICGHOSTNODEECMFORCE_HPP_
@@ -192,11 +192,12 @@ public:
 
                 if (mCellGhostRestLength > 1e-10)
                 {
-                    if (overlap <= 0)  // compression: log repulsion
+                    if (overlap <= 0)  // compression: exponential repulsion
                     {
-                        double log_term = mCellGhostRestLength
-                                          * std::log(1.0 + overlap / mCellGhostRestLength);
-                        force_mag = mCellGhostStiffness * log_term * aniso_factor;
+                        double beta = 5.0;
+                        force_mag = -mCellGhostStiffness
+                                    * (std::exp(-beta * overlap / mCellGhostRestLength) - 1.0)
+                                    * aniso_factor;
                     }
                     else  // extension: density-weighted attraction
                     {

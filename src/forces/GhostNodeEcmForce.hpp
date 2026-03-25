@@ -22,7 +22,6 @@
 
 #include "ChasteSerialization.hpp"
 #include <boost/serialization/base_object.hpp>
-
 #include "AbstractForce.hpp"
 #include "AbstractCellPopulation.hpp"
 #include "VertexBasedCellPopulation.hpp"

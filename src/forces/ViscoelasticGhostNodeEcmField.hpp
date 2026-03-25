@@ -1,22 +1,24 @@
 /*
  * ViscoelasticGhostNodeEcmField.hpp
  *
- * Off-lattice agent-based ECM field with true viscoelastic constitutive law.
- * Templated on spatial dimension (DIM = 2 or 3).
+ * Off-lattice agent-based ECM field with Standard Linear Solid (SLS/Zener)
+ * constitutive law. Templated on spatial dimension (DIM = 2 or 3).
  *
  * Each ghost node carries density, fibre orientation, and spring connectivity.
- * Ghost–ghost springs use a generalized Maxwell model (single-term Prony series)
- * with per-pair evolving rest lengths, giving genuine stress relaxation:
+ * Ghost–ghost springs implement a true SLS with two per-pair rest lengths:
  *
  *   E(t) = E_0 + E_1 * exp(-t/tau)
  *
- * Discrete spring analogue:
- *   Instantaneous force:  F_ij = k_u * (d_ij - s_ij) * A_ij * d_hat_ij
- *   Rest length evolution: ds_ij/dt = (d_ij - s_ij) / tau
+ * Discrete SLS split-force formulation:
+ *   Force: F_ij = E_0*(d_ij - s0_ij) + E_1*(d_ij - s_ij(t))
+ *   where s0_ij = permanent rest length (initial distance, never changes)
+ *         s_ij  = evolving dashpot length (relaxes toward current distance)
  *
- * where k_u = E_0 + E_1 (unrelaxed/instantaneous stiffness)
- * and s_ij relaxes toward d_ij on timescale tau, so that the long-time
- * effective stiffness is E_0 (the relaxed modulus).
+ * Rest length evolution uses the exact exponential integrator:
+ *   s_ij^{n+1} = d_ij + (s_ij^n - d_ij) * exp(-dt/tau)
+ *
+ * This gives: instantaneous stiffness = E_0+E_1, long-time stiffness = E_0 != 0
+ * (solid-like; force never decays to zero).
  *
  * Based on the constitutive framework of:
  *   Fertala et al. (2025) doi:10.1101/2025.07.02.662292
@@ -56,22 +58,23 @@ struct ViscoelasticGhostNode
     double anisotropy;                        ///< Degree of fibre alignment in [0,1]
     bool is_active;                           ///< False if removed (density below threshold)
     std::vector<unsigned> neighbours;         ///< Indices of connected ghost node neighbours
-    std::vector<double> rest_lengths;         ///< Per-pair rest lengths (parallel to neighbours)
+    std::vector<double> rest_lengths;         ///< Per-pair evolving dashpot lengths s_ij(t)
+    std::vector<double> initial_rest_lengths; ///< Per-pair permanent rest lengths s0_ij (never change)
 };
 
 /**
- * Off-lattice ECM field with viscoelastic Maxwell-type constitutive law.
+ * Off-lattice ECM field with Standard Linear Solid (SLS/Zener) constitutive law.
  *
- * The key difference from GhostNodeEcmField is that each ghost–ghost
- * spring pair (i,j) maintains its own evolving rest length s_ij(t).
- * This rest length relaxes toward the current pair distance on timescale tau:
+ * Each ghost–ghost spring pair (i,j) maintains two rest lengths:
+ *   s0_ij   — permanent rest length (initial distance; represents covalent crosslinks)
+ *   s_ij(t) — evolving dashpot length (relaxes toward current distance on timescale tau;
+ *              represents reversible physical network rearrangements)
  *
- *   ds_ij/dt = (d_ij - s_ij) / tau
+ * SLS split-force:
+ *   F = E_0*(d_ij - s0_ij) + E_1*(d_ij - s_ij(t))
  *
- * Combined with the spring force F = k_u * (d_ij - s_ij), this gives
- * a standard linear solid (SLS) / generalized Maxwell response:
- *   - Instantaneous stiffness: k_u = E_0 + E_1
- *   - Long-time stiffness:     k_inf = E_0
+ *   - Instantaneous stiffness: E_0 + E_1
+ *   - Long-time stiffness:     E_0  (non-zero; solid-like)
  *   - Relaxation time:         tau = eta_VE / E_1
  */
 template<unsigned DIM>
@@ -360,27 +363,22 @@ public:
     }
 
     /**
-     * Compute ghost–ghost viscoelastic spring forces, evolve rest lengths,
+     * Compute ghost–ghost SLS spring forces, evolve dashpot rest lengths,
      * and update positions.
      *
-     * This is the core viscoelastic update. For each connected pair (i,j):
-     *
+     * For each connected pair (i,j):
      *   1. Compute current distance d_ij
-     *   2. Compute spring force:  F = k_u * (d_ij - s_ij) * A_ij * d_hat_ij
-     *      where k_u = E_0 + E_1 is the instantaneous stiffness
-     *   3. Evolve rest length:    s_ij += (d_ij - s_ij) * dt / tau
-     *      This is the Maxwell dashpot element: the rest length relaxes
-     *      toward the current length, causing stress relaxation.
-     *   4. Update position (overdamped EoM): x += F/eta_drag * dt
-     *
-     * The result is a Standard Linear Solid (SLS) response:
-     *   - Short times (t << tau): full instantaneous stiffness k_u
-     *   - Long times  (t >> tau): rest length catches up, effective stiffness -> E_0
+     *   2. SLS split-force:
+     *        F = [E_0*(d_ij - s0_ij) + E_1*(d_ij - s_ij)] * A_ij * d_hat_ij
+     *      where s0_ij is permanent and s_ij(t) is the evolving dashpot arm
+     *   3. Evolve dashpot rest length (exact exponential integrator):
+     *        s_ij^{n+1} = d_ij + (s_ij^n - d_ij) * exp(-dt/tau)
+     *      Unconditionally stable for all dt > 0, tau > 0.
+     *   4. Update position (overdamped EoM): x += F_total/eta_drag * dt
      */
     void UpdateGhostNodePositions(double dt)
     {
-        double k_u = mRelaxedStiffness + mRelaxationModulus;  // instantaneous stiffness
-        double inv_tau = 1.0 / mRelaxationTime;
+        // SLS: E_0 arm and E_1 (Maxwell) arm applied separately via split-force
 
         // Accumulate ghost-ghost viscoelastic spring forces (Newton's 3rd law)
         for (unsigned i = 0; i < mNodes.size(); i++)
@@ -402,18 +400,17 @@ public:
 
                 c_vector<double, DIM> unit_disp = disp / dist;
 
-                // Per-pair rest length
-                double s_ij = node_i.rest_lengths[nb];
+                // Per-pair rest lengths: permanent (s0) and evolving dashpot (s)
+                double s_ij  = node_i.rest_lengths[nb];
+                double s0_ij = node_i.initial_rest_lengths[nb];
 
                 // Find the reciprocal index (j's entry pointing to i)
                 // to keep rest lengths symmetric
                 unsigned nb_recip = FindReciprocalIndex(j, i);
 
-                // Spring force: F = k_u * (d - s_ij)
-                // Uses linear spring (no log/exp regime) for clean
-                // viscoelastic interpretation of constitutive parameters
-                double extension = dist - s_ij;
-                double force_mag = k_u * extension;
+                // SLS split-force: F = E_0*(d - s0) + E_1*(d - s)
+                double force_mag = mRelaxedStiffness   * (dist - s0_ij)
+                                 + mRelaxationModulus  * (dist - s_ij);
 
                 // Anisotropic modulation
                 double aniso_factor = 1.0;
@@ -440,16 +437,10 @@ public:
                 node_i.force += force_ij;
                 node_j.force -= force_ij;
 
-                // ── Evolve rest length (Maxwell dashpot) ──────────
-                // ds/dt = (d - s) / tau
-                // Forward Euler: s_new = s + (d - s) * dt / tau
-                double ds = extension * dt * inv_tau;
-                double new_s = s_ij + ds;
-
-                // Clamp rest length to prevent negative or excessively large values
-                double min_rest = mInitialSpacing * 0.1;
-                double max_rest = mInitialSpacing * 5.0;
-                new_s = std::max(min_rest, std::min(max_rest, new_s));
+                // ── Evolve dashpot rest length (exact exponential integrator) ──
+                // Solves ds/dt = (d - s)/tau exactly over the interval dt.
+                // s^{n+1} = d + (s^n - d) * exp(-dt/tau)  [unconditionally stable]
+                double new_s = dist + (s_ij - dist) * std::exp(-dt / mRelaxationTime);
 
                 node_i.rest_lengths[nb] = new_s;
                 node_j.rest_lengths[nb_recip] = new_s;
@@ -507,20 +498,23 @@ public:
                 for (unsigned nb = 0; nb < node.neighbours.size(); nb++)
                 {
                     unsigned n_idx = node.neighbours[nb];
-                    auto& n_list = mNodes[n_idx].neighbours;
-                    auto& r_list = mNodes[n_idx].rest_lengths;
+                    auto& n_list  = mNodes[n_idx].neighbours;
+                    auto& r_list  = mNodes[n_idx].rest_lengths;
+                    auto& r0_list = mNodes[n_idx].initial_rest_lengths;
                     for (unsigned k = 0; k < n_list.size(); k++)
                     {
                         if (n_list[k] == i)
                         {
                             n_list.erase(n_list.begin() + k);
                             r_list.erase(r_list.begin() + k);
+                            r0_list.erase(r0_list.begin() + k);
                             break;
                         }
                     }
                 }
                 node.neighbours.clear();
                 node.rest_lengths.clear();
+                node.initial_rest_lengths.clear();
             }
         }
 
@@ -681,8 +675,12 @@ public:
             double avg_strain = 0.0;
             if (!n.rest_lengths.empty())
             {
-                for (double s : n.rest_lengths)
-                    avg_strain += (s - mInitialSpacing) / mInitialSpacing;
+                for (unsigned nb = 0; nb < n.rest_lengths.size(); nb++)
+                {
+                    double s0 = n.initial_rest_lengths[nb];
+                    if (s0 > 1e-10)
+                        avg_strain += (n.rest_lengths[nb] - s0) / s0;
+                }
                 avg_strain /= static_cast<double>(n.rest_lengths.size());
             }
             file << avg_strain << "\n";
@@ -863,8 +861,10 @@ private:
                                 double initial_rest = std::sqrt(dist_sq);
                                 mNodes[i].neighbours.push_back(j);
                                 mNodes[i].rest_lengths.push_back(initial_rest);
+                                mNodes[i].initial_rest_lengths.push_back(initial_rest);
                                 mNodes[j].neighbours.push_back(i);
                                 mNodes[j].rest_lengths.push_back(initial_rest);
+                                mNodes[j].initial_rest_lengths.push_back(initial_rest);
                             }
                         }
                     }
@@ -892,8 +892,10 @@ private:
                                     double initial_rest = std::sqrt(dist_sq);
                                     mNodes[i].neighbours.push_back(j);
                                     mNodes[i].rest_lengths.push_back(initial_rest);
+                                    mNodes[i].initial_rest_lengths.push_back(initial_rest);
                                     mNodes[j].neighbours.push_back(i);
                                     mNodes[j].rest_lengths.push_back(initial_rest);
+                                    mNodes[j].initial_rest_lengths.push_back(initial_rest);
                                 }
                             }
                         }
