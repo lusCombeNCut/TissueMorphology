@@ -19,11 +19,20 @@
 #include "AbstractCentreBasedDivisionRule.hpp"
 #include "AbstractCentreBasedCellPopulation.hpp"
 #include "RandomNumberGenerator.hpp"
+#include "RingTopologyTracker.hpp"
 
 template <unsigned ELEMENT_DIM, unsigned SPACE_DIM>
 class TangentialCentreBasedDivisionRule : public AbstractCentreBasedDivisionRule<ELEMENT_DIM, SPACE_DIM>
 {
 private:
+    /**
+     * Optional pointer to a RingTopologyTracker.
+     * When set, NotifyDivision() is called with the parent's location index
+     * at division time so the tracker can match daughters to their exact parents.
+     * Raw (non-owning) pointer; not serialized (re-wired at simulation start).
+     */
+    RingTopologyTracker<SPACE_DIM>* mpRingTracker;
+
     friend class boost::serialization::access;
 
     template <class Archive>
@@ -34,7 +43,12 @@ private:
 
 public:
 
-    TangentialCentreBasedDivisionRule() {}
+    TangentialCentreBasedDivisionRule() : mpRingTracker(nullptr) {}
+
+    void SetRingTopologyTracker(RingTopologyTracker<SPACE_DIM>* pTracker)
+    {
+        mpRingTracker = pTracker;
+    }
 
     virtual ~TangentialCentreBasedDivisionRule() {}
 
@@ -56,6 +70,14 @@ public:
         // Get parent's current location
         c_vector<double, SPACE_DIM> parent_location =
             rCellPopulation.GetLocationOfCellCentre(pParentCell);
+
+        // Notify the ring topology tracker of this division so it can record the
+        // exact parent index rather than guessing by proximity at end-of-timestep.
+        if (mpRingTracker != nullptr)
+        {
+            unsigned parentIdx = rCellPopulation.GetLocationIndexUsingCell(pParentCell);
+            mpRingTracker->NotifyDivision(parentIdx);
+        }
 
         // Get the division separation distance
         double separation = rCellPopulation.GetMeinekeDivisionSeparation();

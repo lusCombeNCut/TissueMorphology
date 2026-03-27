@@ -90,6 +90,14 @@ private:
     /** Grid spacing used during initialization */
     double mInitialSpacing;
 
+    /** Domain bounds (tracked for boundary expansion) */
+    double mDomainMin[3];
+    double mDomainMax[3];
+
+    /** Grid type and fibre pattern (for generating new nodes) */
+    std::string mGridType;
+    std::string mFibrePattern;
+
     /** Spatial hash grid for efficient neighbor queries */
     double mSpatialHashCellSize;
     int mHashN[3];        ///< Hash grid dimensions [Nx, Ny, Nz]
@@ -137,8 +145,14 @@ public:
           mFibreRemodelingRate(0.1),
           mAnisotropyStrength(0.5),
           mInitialSpacing(spacing),
+          mGridType(gridType),
+          mFibrePattern(fibrePattern),
           mSpatialHashCellSize(spacing * 2.0)
     {
+        mDomainMin[0] = xMin; mDomainMax[0] = xMax;
+        mDomainMin[1] = yMin; mDomainMax[1] = yMax;
+        mDomainMin[2] = 0.0;  mDomainMax[2] = 0.0;
+
         mHashN[0] = static_cast<int>(std::ceil((xMax - xMin) / mSpatialHashCellSize)) + 1;
         mHashN[1] = static_cast<int>(std::ceil((yMax - yMin) / mSpatialHashCellSize)) + 1;
         mHashN[2] = 1;
@@ -191,8 +205,14 @@ public:
           mFibreRemodelingRate(0.1),
           mAnisotropyStrength(0.5),
           mInitialSpacing(spacing),
+          mGridType(gridType),
+          mFibrePattern(fibrePattern),
           mSpatialHashCellSize(spacing * 2.0)
     {
+        mDomainMin[0] = xMin; mDomainMax[0] = xMax;
+        mDomainMin[1] = yMin; mDomainMax[1] = yMax;
+        mDomainMin[2] = zMin; mDomainMax[2] = zMax;
+
         mHashN[0] = static_cast<int>(std::ceil((xMax - xMin) / mSpatialHashCellSize)) + 1;
         mHashN[1] = static_cast<int>(std::ceil((yMax - yMin) / mSpatialHashCellSize)) + 1;
         mHashN[2] = static_cast<int>(std::ceil((zMax - zMin) / mSpatialHashCellSize)) + 1;
@@ -265,6 +285,10 @@ public:
 
     void SetFibreRemodelingRate(double rate) { mFibreRemodelingRate = rate; }
     void SetAnisotropyStrength(double a) { mAnisotropyStrength = a; }
+
+    double GetDomainMin(unsigned dim) const { return mDomainMin[dim]; }
+    double GetDomainMax(unsigned dim) const { return mDomainMax[dim]; }
+    double GetInitialSpacing() const { return mInitialSpacing; }
 
     // -- Core methods ---------------------------------------------
 
@@ -534,6 +558,241 @@ public:
     }
 
     /**
+     * Expand the ghost node domain if any cell position is within a threshold
+     * of the current domain boundary. New nodes are generated in a strip
+     * extending the domain by one spacing width in each direction that needs
+     * expansion. Neighbours are connected via spatial hash lookup.
+     *
+     * @param cellPositions  All current cell centroid positions
+     * @param threshold      Distance from boundary that triggers expansion
+     * @return Number of new ghost nodes added
+     */
+    unsigned ExpandBoundary(const std::vector<c_vector<double, DIM>>& cellPositions,
+                            double threshold)
+    {
+        // Determine which faces need expansion
+        bool expandLo[3] = {false, false, false};
+        bool expandHi[3] = {false, false, false};
+
+        for (const auto& pos : cellPositions)
+        {
+            for (unsigned d = 0; d < DIM; d++)
+            {
+                if (pos[d] - mDomainMin[d] < threshold) expandLo[d] = true;
+                if (mDomainMax[d] - pos[d] < threshold) expandHi[d] = true;
+            }
+        }
+
+        bool any_expansion = false;
+        for (unsigned d = 0; d < DIM; d++)
+        {
+            if (expandLo[d] || expandHi[d]) { any_expansion = true; break; }
+        }
+        if (!any_expansion) return 0;
+
+        // Compute new domain bounds (extend by one spacing in each flagged direction)
+        double newMin[3], newMax[3];
+        for (unsigned d = 0; d < DIM; d++)
+        {
+            newMin[d] = expandLo[d] ? mDomainMin[d] - mInitialSpacing : mDomainMin[d];
+            newMax[d] = expandHi[d] ? mDomainMax[d] + mInitialSpacing : mDomainMax[d];
+        }
+
+        // Generate candidate node positions on the grid within the NEW domain
+        // but OUTSIDE the old domain (i.e. only in the expansion strips)
+        std::vector<c_vector<double, DIM>> new_positions;
+        double spacing = mInitialSpacing;
+
+        if (DIM == 2)
+        {
+            if (mGridType == "hex")
+            {
+                double row_spacing = spacing * std::sqrt(3.0) / 2.0;
+                int row = 0;
+                for (double y = newMin[1]; y <= newMax[1]; y += row_spacing)
+                {
+                    double x_offset = (row % 2 == 1) ? spacing * 0.5 : 0.0;
+                    for (double x = newMin[0] + x_offset; x <= newMax[0]; x += spacing)
+                    {
+                        // Only add if outside old domain
+                        if (x >= mDomainMin[0] && x <= mDomainMax[0] &&
+                            y >= mDomainMin[1] && y <= mDomainMax[1])
+                            continue;
+                        c_vector<double, DIM> pos = zero_vector<double>(DIM);
+                        pos[0] = x; pos[1] = y;
+                        new_positions.push_back(pos);
+                    }
+                    row++;
+                }
+            }
+            else // square
+            {
+                for (double y = newMin[1]; y <= newMax[1]; y += spacing)
+                {
+                    for (double x = newMin[0]; x <= newMax[0]; x += spacing)
+                    {
+                        if (x >= mDomainMin[0] && x <= mDomainMax[0] &&
+                            y >= mDomainMin[1] && y <= mDomainMax[1])
+                            continue;
+                        c_vector<double, DIM> pos = zero_vector<double>(DIM);
+                        pos[0] = x; pos[1] = y;
+                        new_positions.push_back(pos);
+                    }
+                }
+            }
+        }
+        else // DIM == 3
+        {
+            for (double z = newMin[2]; z <= newMax[2]; z += spacing)
+            {
+                for (double y = newMin[1]; y <= newMax[1]; y += spacing)
+                {
+                    for (double x = newMin[0]; x <= newMax[0]; x += spacing)
+                    {
+                        if (x >= mDomainMin[0] && x <= mDomainMax[0] &&
+                            y >= mDomainMin[1] && y <= mDomainMax[1] &&
+                            z >= mDomainMin[2] && z <= mDomainMax[2])
+                            continue;
+                        c_vector<double, DIM> pos = zero_vector<double>(DIM);
+                        pos[0] = x; pos[1] = y; pos[2] = z;
+                        new_positions.push_back(pos);
+                    }
+                }
+            }
+        }
+
+        if (new_positions.empty()) return 0;
+
+        // Create new ghost nodes
+        unsigned first_new_id = mNodes.size();
+        for (unsigned i = 0; i < new_positions.size(); i++)
+        {
+            GhostNode<DIM> gn;
+            gn.id = first_new_id + i;
+            gn.position = new_positions[i];
+            gn.velocity = zero_vector<double>(DIM);
+            gn.force = zero_vector<double>(DIM);
+            gn.density = 1.0;
+            gn.is_active = true;
+            gn.anisotropy = 0.0;
+            gn.fibre_direction = zero_vector<double>(DIM);
+
+            // Radial fibre pattern relative to origin
+            double r = norm_2(gn.position);
+            if (r > 1e-10)
+            {
+                gn.fibre_direction = gn.position / r;
+                gn.anisotropy = 0.5;
+            }
+            else
+            {
+                gn.fibre_direction[0] = 1.0;
+            }
+
+            mNodes.push_back(gn);
+        }
+
+        unsigned num_added = new_positions.size();
+
+        // Update domain bounds
+        for (unsigned d = 0; d < DIM; d++)
+        {
+            mDomainMin[d] = newMin[d];
+            mDomainMax[d] = newMax[d];
+        }
+
+        // Expand spatial hash to cover new domain
+        mHashMin[0] = newMin[0];
+        mHashMin[1] = newMin[1];
+        mHashN[0] = static_cast<int>(std::ceil((newMax[0] - newMin[0]) / mSpatialHashCellSize)) + 1;
+        mHashN[1] = static_cast<int>(std::ceil((newMax[1] - newMin[1]) / mSpatialHashCellSize)) + 1;
+        if (DIM == 3)
+        {
+            mHashMin[2] = newMin[2];
+            mHashN[2] = static_cast<int>(std::ceil((newMax[2] - newMin[2]) / mSpatialHashCellSize)) + 1;
+        }
+        mSpatialHash.clear();
+        mSpatialHash.resize(GetTotalBuckets());
+        RebuildSpatialHash();
+
+        // Build neighbour connectivity for new nodes (connect to both new and existing nodes)
+        double neighbour_cutoff = mInitialSpacing * 1.6;
+        double cutoff_sq = neighbour_cutoff * neighbour_cutoff;
+        int range = static_cast<int>(std::ceil(neighbour_cutoff / mSpatialHashCellSize));
+
+        for (unsigned ni = first_new_id; ni < mNodes.size(); ni++)
+        {
+            const auto& pos_i = mNodes[ni].position;
+            int cx = static_cast<int>((pos_i[0] - mHashMin[0]) / mSpatialHashCellSize);
+            int cy = static_cast<int>((pos_i[1] - mHashMin[1]) / mSpatialHashCellSize);
+
+            if (DIM == 2)
+            {
+                for (int ix = cx - range; ix <= cx + range; ix++)
+                {
+                    for (int iy = cy - range; iy <= cy + range; iy++)
+                    {
+                        if (ix < 0 || ix >= mHashN[0] || iy < 0 || iy >= mHashN[1]) continue;
+                        const auto& bucket = mSpatialHash[GetHashIndex(ix, iy)];
+                        for (unsigned j : bucket)
+                        {
+                            if (j == ni) continue;
+                            if (!mNodes[j].is_active) continue;
+                            // Avoid duplicate links: only connect if j < ni (new-new)
+                            // or j is an existing node (j < first_new_id)
+                            // For new-new pairs, process once via j < ni
+                            if (j >= first_new_id && j >= ni) continue;
+                            c_vector<double, DIM> disp = mNodes[j].position - pos_i;
+                            double dist_sq = inner_prod(disp, disp);
+                            if (dist_sq < cutoff_sq)
+                            {
+                                mNodes[ni].neighbours.push_back(j);
+                                mNodes[j].neighbours.push_back(ni);
+                            }
+                        }
+                    }
+                }
+            }
+            else // DIM == 3
+            {
+                int cz = static_cast<int>((pos_i[2] - mHashMin[2]) / mSpatialHashCellSize);
+                for (int ix = cx - range; ix <= cx + range; ix++)
+                {
+                    for (int iy = cy - range; iy <= cy + range; iy++)
+                    {
+                        for (int iz = cz - range; iz <= cz + range; iz++)
+                        {
+                            if (ix < 0 || ix >= mHashN[0] || iy < 0 || iy >= mHashN[1]
+                                || iz < 0 || iz >= mHashN[2]) continue;
+                            const auto& bucket = mSpatialHash[GetHashIndex(ix, iy, iz)];
+                            for (unsigned j : bucket)
+                            {
+                                if (j == ni) continue;
+                                if (!mNodes[j].is_active) continue;
+                                if (j >= first_new_id && j >= ni) continue;
+                                c_vector<double, DIM> disp = mNodes[j].position - pos_i;
+                                double dist_sq = inner_prod(disp, disp);
+                                if (dist_sq < cutoff_sq)
+                                {
+                                    mNodes[ni].neighbours.push_back(j);
+                                    mNodes[j].neighbours.push_back(ni);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        UpdateActiveCount();
+
+        std::cout << "  GhostNodeECM: expanded boundary, added " << num_added
+                  << " new nodes (" << mNumActive << " total active)" << std::endl;
+
+        return num_added;
+    }
+
+    /**
      * Apply cell traction to remodel fibre orientation.
      * Fibres near the cell rotate toward the traction direction.
      */
@@ -714,7 +973,9 @@ private:
                 gn.position[1] = y;
                 gn.velocity = zero_vector<double>(DIM);
                 gn.force = zero_vector<double>(DIM);
-                gn.density = 1.0;
+                // Clipped Gaussian: mean=0.95, std=0.025, range [0.9, 1.0]
+                double raw_density = RandomNumberGenerator::Instance()->NormalRandomDeviate(0.95, 0.025);
+                gn.density = std::max(0.9, std::min(1.0, raw_density));
                 gn.fibre_direction = zero_vector<double>(DIM);
                 gn.fibre_direction[0] = 1.0;
                 gn.anisotropy = 0.0;
@@ -743,7 +1004,9 @@ private:
                 gn.position[1] = y;
                 gn.velocity = zero_vector<double>(DIM);
                 gn.force = zero_vector<double>(DIM);
-                gn.density = 1.0;
+                // Clipped Gaussian: mean=0.95, std=0.025, range [0.9, 1.0]
+                double raw_density = RandomNumberGenerator::Instance()->NormalRandomDeviate(0.95, 0.025);
+                gn.density = std::max(0.9, std::min(1.0, raw_density));
                 gn.fibre_direction = zero_vector<double>(DIM);
                 gn.fibre_direction[0] = 1.0;
                 gn.anisotropy = 0.0;
@@ -775,7 +1038,9 @@ private:
                     gn.position[2] = z;
                     gn.velocity = zero_vector<double>(DIM);
                     gn.force = zero_vector<double>(DIM);
-                    gn.density = 1.0;
+                    // Clipped Gaussian: mean=0.95, std=0.025, range [0.9, 1.0]
+                    double raw_density = RandomNumberGenerator::Instance()->NormalRandomDeviate(0.95, 0.025);
+                    gn.density = std::max(0.9, std::min(1.0, raw_density));
                     gn.fibre_direction = zero_vector<double>(DIM);
                     gn.fibre_direction[0] = 1.0;
                     gn.anisotropy = 0.0;

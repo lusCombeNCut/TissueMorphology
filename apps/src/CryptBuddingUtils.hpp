@@ -169,60 +169,57 @@ inline void PrintBanner(const CryptBuddingParams& p)
 #ifndef TM_GIT_HASH
 #define TM_GIT_HASH "unknown"
 #endif
-    std::cout << "\n============================================" << std::endl;
-    std::cout << "  Crypt Budding Simulation" << std::endl;
-    std::cout << "  Git Commit:     " << TM_GIT_HASH << std::endl;
-    std::cout << "  Model:          " << p.modelType << std::endl;
+    const bool is2d  = (p.modelType == "node2d"   || p.modelType == "vertex2d");
+    const bool isNode = (p.modelType == "node2d"  || p.modelType == "node3d");
+    const bool is3d  = (p.modelType == "node3d"   || p.modelType == "vertex3d");
+
+    auto onoff = [](bool v) { return v ? "ON " : "OFF"; };
+
+    std::cout << "\n============================================================\n"
+              << "  Crypt Budding Simulation\n"
+              << "  Git:      " << TM_GIT_HASH << "\n"
+              << "  Model:    " << p.modelType
+              << "   Run: " << p.runNumber
+              << "   Seed: " << p.randomSeed << "\n"
+              << "  Time:     end=" << p.endTime << "h"
+              << "  dt=" << p.dt;
+    if (p.enableRelaxation)
+        std::cout << "  relax=" << p.relaxationTime << "h";
+    std::cout << "\n";
+    std::cout << "  Springs:  k=" << p.springStiffness
+              << "  cutoff=" << p.springCutoff;
+    // Warn if cutoff ≤ rest length (1.0 by default) — eliminates all attraction
+    if (p.springCutoff <= 1.0)
+        std::cout << "  *** WARNING: cutoff <= rest length, no attractive spring force! ***";
+    std::cout << "\n";
+    std::cout << "  ECM:      stiffness=" << p.ecmStiffness;
     if (p.enableGhostNodeECM)
+        std::cout << " (ghost node)";
+    std::cout << "\n";
+    std::cout << "  Cells:    stem=" << p.stemFraction
+              << "  TA=" << p.transitFraction
+              << "  diff=" << (1.0 - p.stemFraction - p.transitFraction) << "\n";
+
+    std::cout << "  Features:\n"
+              << "    Lumen Pressure:        " << onoff(p.enableLumenPressure)  << "\n"
+              << "    Apical Constriction:   " << onoff(p.enableApicalConstriction) << "\n"
+              << "    ECM Confinement:       " << onoff(p.enableEcmConfinement) << "\n"
+              << "    Ghost Node ECM:        " << onoff(p.enableGhostNodeECM)   << "\n"
+              << "    Relaxation:            " << onoff(p.enableRelaxation)     << "\n"
+              << "    Differential Adhesion: " << onoff(p.enableDifferentialAdhesion) << "\n";
+    if (is2d)
+        std::cout << "    Sloughing:             " << onoff(p.enableSloughing)  << "\n";
+    if (isNode)
     {
-        std::cout << "  Ghost ECM Stiffness: " << p.ghostGhostStiffness << std::endl;
+        std::cout << "    Topology Springs:      " << onoff(p.useTopologyBasedSprings) << "\n"
+                  << "    Curvature Bending:     " << onoff(p.enableCurvatureBending)  << "\n"
+                  << "    Cell Polarity:         " << onoff(p.enableCellPolarity)      << "\n";
     }
-    else
-    {
-        std::cout << "  ECM Confinement: " << p.ecmConfinementStiffness << std::endl;
-    }
-    std::cout << "  Run Number:     " << p.runNumber << std::endl;
-    std::cout << "  Seed:           " << p.randomSeed << std::endl;
-    std::cout << "  dt:             " << p.dt << std::endl;
-    std::cout << "  Relaxation:     " << (p.enableRelaxation ? "ON" : "OFF")
-              << " (" << p.relaxationTime << "h)" << std::endl;
-    std::cout << "  End Time:       " << p.endTime << "h" << std::endl;
-    std::cout << "  Cell fractions: stem=" << p.stemFraction
-              << " TA=" << p.transitFraction
-              << " diff=" << (1.0 - p.stemFraction - p.transitFraction) << std::endl;
-    if (p.modelType == "vertex3d")
-    {
-        std::cout << "  Gamma scaling:  stem=" << p.gammaStemScale
-                  << " TA=" << p.gammaTransitScale
-                  << " diff/Paneth=" << p.gammaDiffScale << std::endl;
-    }
-    std::cout << "  Features:" << std::endl;
-    std::cout << "    Lumen Pressure:         " << (p.enableLumenPressure ? "ON" : "OFF") << std::endl;
-    std::cout << "    Apical Constriction:     " << (p.enableApicalConstriction ? "ON" : "OFF") << std::endl;
-    std::cout << "    ECM Confinement:         " << (p.enableEcmConfinement ? "ON" : "OFF") << std::endl;
-    if (p.modelType == "node3d" || p.modelType == "vertex3d")
-        std::cout << "    ECM Guidance (3D):       " << (p.enableEcmGuidance ? "ON" : "OFF") << std::endl;
-    if (p.modelType == "node2d" || p.modelType == "vertex2d")
-        std::cout << "    Sloughing:               " << (p.enableSloughing ? "ON" : "OFF") << std::endl;
-    if (p.enableDifferentialAdhesion)
-        std::cout << "    Differential Adhesion:   ON" << std::endl;
-    if (p.modelType == "node2d" || p.modelType == "node3d")
-    {
-        std::cout << "    Curvature Bending:       " << (p.enableCurvatureBending ? "ON" : "OFF") << std::endl;
-        std::cout << "    Cell Polarity:           " << (p.enableCellPolarity ? "ON" : "OFF") << std::endl;
-    }
-    if (p.modelType == "node2d" || p.modelType == "node3d")
-        std::cout << "    Topology-Based Springs:  " << (p.useTopologyBasedSprings ? "ON" : "OFF") << std::endl;
-    if (p.enableEcmConfinement)
-    {
-        std::cout << "    ECM Confinement Params:" << std::endl;
-        std::cout << "      Grid Type:             " << p.ecmGridType << std::endl;
-        std::cout << "      Grid Spacing:          " << p.ecmGridSpacing << std::endl;
-        std::cout << "      Degradation Rate:      " << p.ecmDegradationRate << std::endl;
-    }
+    if (is3d)
+        std::cout << "    ECM Guidance:          " << onoff(p.enableEcmGuidance) << "\n";
     if (p.enableContinuousPvd)
-        std::cout << "    Continuous PVD:          ON" << std::endl;
-    std::cout << "============================================\n" << std::endl;
+        std::cout << "    Continuous PVD:        ON\n";
+    std::cout << "============================================================\n" << std::endl;
 }
 
 inline void PrintUsage()
@@ -253,6 +250,8 @@ inline void PrintUsage()
               << "  -dt <double>          override timestep (relaxation in vertex3d)\n"
               << "  -dtgrow <double>      growth phase timestep, vertex3d (default: 0.002)\n"
               << "  -continuous-pvd       keep .pvd files valid during simulation\n"
+              << "  -v, -verbose          verbose output (verbosity level 2)\n"
+              << "  -q, -quiet            suppress non-error output (verbosity level 0)\n"
               << "\nVertex model parameters (Nagai-Honda):\n"
               << "  -adhesion <double>    cell-cell adhesion strength (default: 1.0)\n"
               << "  -membrane <double>    membrane surface tension (default: 10.0)\n"
@@ -383,6 +382,14 @@ inline CryptBuddingParams ParseArguments(int argc, char* argv[])
         else if (arg == "-continuous-pvd")
         {
             p.enableContinuousPvd = true;
+        }
+        else if (arg == "-v" || arg == "-verbose")
+        {
+            p.verbosity = 2;
+        }
+        else if (arg == "-q" || arg == "-quiet")
+        {
+            p.verbosity = 0;
         }
         else if (arg == "-adhesion" && i + 1 < argc)
         {

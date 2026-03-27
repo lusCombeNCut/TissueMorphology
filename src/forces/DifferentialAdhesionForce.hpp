@@ -39,23 +39,24 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ChasteSerialization.hpp"
 #include <boost/serialization/base_object.hpp>
 
-#include "GeneralisedLinearSpringForce.hpp"
+#include "RingSpringForce.hpp"
 #include "AbstractCellPopulation.hpp"
 
 /**
  * A force class implementing differential adhesion between cell types.
  *
- * Extends GeneralisedLinearSpringForce to include cell-type specific
- * adhesion strengths. Different cell types (e.g., apical vs basal)
- * have different adhesion energies, driving cell sorting and layer formation.
+ * Extends RingSpringForce so that when a RingTopologyTracker is set,
+ * forces are only applied between topological neighbours (not all pairs
+ * within the cutoff distance). Falls back to distance-based interactions
+ * if no tracker is set.
  *
  * Adhesion matrix:
  * - Apical-Apical: strong
- * - Basal-Basal: strong  
+ * - Basal-Basal: strong
  * - Apical-Basal: weak
  */
 template<unsigned ELEMENT_DIM, unsigned SPACE_DIM=ELEMENT_DIM>
-class DifferentialAdhesionForce : public GeneralisedLinearSpringForce<ELEMENT_DIM, SPACE_DIM>
+class DifferentialAdhesionForce : public RingSpringForce<SPACE_DIM>
 {
     friend class boost::serialization::access;
 
@@ -79,7 +80,7 @@ private:
     template<class Archive>
     void serialize(Archive & archive, const unsigned int version)
     {
-        archive & boost::serialization::base_object<GeneralisedLinearSpringForce<ELEMENT_DIM, SPACE_DIM> >(*this);
+        archive & boost::serialization::base_object<RingSpringForce<SPACE_DIM> >(*this);
         archive & mApicalApicalAdhesion;
         archive & mBasalBasalAdhesion;
         archive & mApicalBasalAdhesion;
@@ -91,7 +92,7 @@ public:
      * Constructor.
      */
     DifferentialAdhesionForce()
-        : GeneralisedLinearSpringForce<ELEMENT_DIM, SPACE_DIM>(),
+        : RingSpringForce<SPACE_DIM>(),
           mApicalApicalAdhesion(1.0),
           mBasalBasalAdhesion(1.0),
           mApicalBasalAdhesion(0.5)
@@ -139,9 +140,13 @@ public:
      */
     double VariableSpringConstantMultiplicationFactor(unsigned nodeAGlobalIndex,
                                                        unsigned nodeBGlobalIndex,
-                                                       AbstractCellPopulation<ELEMENT_DIM, SPACE_DIM>& rCellPopulation,
-                                                       bool isCloserThanRestLength)
+                                                       AbstractCellPopulation<SPACE_DIM, SPACE_DIM>& rCellPopulation,
+                                                       bool isCloserThanRestLength) override
     {
+        // Start with the cell-type stiffness scaling from RingSpringForce
+        double base_factor = RingSpringForce<SPACE_DIM>::VariableSpringConstantMultiplicationFactor(
+            nodeAGlobalIndex, nodeBGlobalIndex, rCellPopulation, isCloserThanRestLength);
+
         // Get cells associated with nodes
         CellPtr p_cell_A = rCellPopulation.GetCellUsingLocationIndex(nodeAGlobalIndex);
         CellPtr p_cell_B = rCellPopulation.GetCellUsingLocationIndex(nodeBGlobalIndex);
@@ -150,10 +155,10 @@ public:
         int type_A = GetCellType(p_cell_A);
         int type_B = GetCellType(p_cell_B);
 
-        // If types undefined, use default spring constant
+        // If types undefined, use only the base factor
         if (type_A < 0 || type_B < 0)
         {
-            return 1.0;
+            return base_factor;
         }
 
         // Determine adhesion strength based on cell type pairing
@@ -161,21 +166,18 @@ public:
 
         if (type_A == 1 && type_B == 1)
         {
-            // Apical-Apical
             adhesion_multiplier = mApicalApicalAdhesion;
         }
         else if (type_A == 0 && type_B == 0)
         {
-            // Basal-Basal
             adhesion_multiplier = mBasalBasalAdhesion;
         }
         else
         {
-            // Apical-Basal (heterotypic)
             adhesion_multiplier = mApicalBasalAdhesion;
         }
 
-        return adhesion_multiplier;
+        return base_factor * adhesion_multiplier;
     }
 
     /**
@@ -253,7 +255,7 @@ public:
         *rParamsFile << "\t\t\t<ApicalBasalAdhesion>" << mApicalBasalAdhesion << "</ApicalBasalAdhesion>\n";
 
         // Call method on direct parent class
-        GeneralisedLinearSpringForce<ELEMENT_DIM, SPACE_DIM>::OutputForceParameters(rParamsFile);
+        RingSpringForce<SPACE_DIM>::OutputForceParameters(rParamsFile);
     }
 };
 

@@ -49,6 +49,14 @@ private:
     /** Track which cells existed at last update (for detecting new cells) */
     std::set<unsigned> mKnownCells;
 
+    /**
+     * Parent cell indices that divided this timestep.
+     * Populated by NotifyDivision() from the division rule so UpdateAtEndOfTimeStep
+     * can restrict parent search to actual parents rather than all known cells.
+     * Cleared at the end of each UpdateAtEndOfTimeStep.
+     */
+    std::set<unsigned> mPendingParents;
+
     friend class boost::serialization::access;
     template<class Archive>
     void serialize(Archive & archive, const unsigned int version)
@@ -58,6 +66,7 @@ private:
         archive & mCenter;
         archive & mInitialized;
         archive & mKnownCells;
+        archive & mPendingParents;
     }
 
 public:
@@ -76,6 +85,16 @@ public:
     void SetCenter(const c_vector<double, DIM>& center)
     {
         mCenter = center;
+    }
+
+    /**
+     * Called by the division rule at the moment a cell divides.
+     * Records the parent's location index so UpdateAtEndOfTimeStep can
+     * match daughters to their exact parents rather than guessing by proximity.
+     */
+    void NotifyDivision(unsigned parentIdx)
+    {
+        mPendingParents.insert(parentIdx);
     }
 
     /**
@@ -278,47 +297,49 @@ public:
             }
         }
 
-        // Handle new cells (from division)
+        // Handle new cells (from division).
+        // Use mPendingParents (exact parent indices from the division rule) when available.
+        // Fall back to searching all mKnownCells only if the division rule is not connected.
+        const std::set<unsigned>& candidates = mPendingParents.empty() ? mKnownCells : mPendingParents;
+
         for (unsigned daughterIdx : newCells)
         {
-            // Find the parent by checking which existing cell is closest
             c_vector<double, DIM> daughterPos = rCellPopulation.GetLocationOfCellCentre(cellMap[daughterIdx]);
-            
+
             double minDist = DBL_MAX;
             unsigned parentIdx = UINT_MAX;
 
-            for (unsigned existingIdx : mKnownCells)
+            for (unsigned candidateIdx : candidates)
             {
-                if (cellMap.find(existingIdx) == cellMap.end()) continue;
-                
-                c_vector<double, DIM> existingPos = rCellPopulation.GetLocationOfCellCentre(cellMap[existingIdx]);
-                double dist = norm_2(existingPos - daughterPos);
-                
+                if (cellMap.find(candidateIdx) == cellMap.end()) continue;
+
+                c_vector<double, DIM> candidatePos = rCellPopulation.GetLocationOfCellCentre(cellMap[candidateIdx]);
+                double dist = norm_2(candidatePos - daughterPos);
+
                 if (dist < minDist)
                 {
                     minDist = dist;
-                    parentIdx = existingIdx;
+                    parentIdx = candidateIdx;
                 }
             }
 
             if (parentIdx != UINT_MAX)
             {
-                // Insert daughter next to parent
-                // Determine which side based on angular position
                 c_vector<double, DIM> parentPos = rCellPopulation.GetLocationOfCellCentre(cellMap[parentIdx]);
-                
+
                 double parentAngle = std::atan2(parentPos[1] - mCenter[1], parentPos[0] - mCenter[0]);
                 double daughterAngle = std::atan2(daughterPos[1] - mCenter[1], daughterPos[0] - mCenter[0]);
-                
-                // Normalize angle difference to [-π, π]
+
                 double angleDiff = daughterAngle - parentAngle;
                 while (angleDiff > M_PI) angleDiff -= 2.0 * M_PI;
                 while (angleDiff < -M_PI) angleDiff += 2.0 * M_PI;
 
-                // Insert on the appropriate side
                 InsertDaughter(parentIdx, daughterIdx, angleDiff > 0);
             }
         }
+
+        // Clear pending parents — they've been consumed for this timestep
+        mPendingParents.clear();
 
         // Handle dead cells
         for (unsigned deadIdx : deadCells)

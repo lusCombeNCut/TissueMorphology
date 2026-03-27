@@ -44,6 +44,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sstream>
 #include "UblasVectorInclude.hpp"
 #include "Exception.hpp"
+#include "RandomNumberGenerator.hpp"
 
 /**
  * Dynamic ECM Field
@@ -210,7 +211,9 @@ private:
                 double x = cellPos[0];
                 
                 ECMGridCell cell;
-                cell.density = 1.0;
+                // Clipped Gaussian: mean=0.95, std=0.025, range [0.9, 1.0]
+                double raw_density = RandomNumberGenerator::Instance()->NormalRandomDeviate(0.95, 0.025);
+                cell.density = std::max(0.9, std::min(1.0, raw_density));
                 cell.anisotropy = 1.0;
                 
                 if (mInitialECMType == "random")

@@ -29,11 +29,9 @@
 #include "FiniteThicknessRandomizedSphereMeshGenerator.hpp"
 #include "FiniteThicknessSimulation3d.hpp"
 
-#include "UniformContactInhibitionCellCycleModel.hpp"
-#include "UniformContactInhibitionGenerationalCellCycleModel.hpp"
-#include "TransitCellProliferativeType.hpp"
-#include "StemCellProliferativeType.hpp"
-#include "DifferentiatedCellProliferativeType.hpp"
+#include "CellSetupHelpers.hpp"
+#include "ECMWiringHelpers.hpp"
+#include "SimulationHelpers.hpp"
 #include "WildTypeCellMutationState.hpp"
 #include "ApcOneHitCellMutationState.hpp"
 #include "ApcTwoHitCellMutationState.hpp"
@@ -53,7 +51,6 @@
 #include "ViscoelasticGhostNodeEcmForce.hpp"
 #include "ViscoelasticGhostNodeEcmWriter.hpp"
 
-#include "VolumeTrackingModifier.hpp"
 #include "GeometricalTargetVolumeModifier.hpp"
 #include "CellVolumesWriter.hpp"
 #include "CellThicknessWriter.hpp"
@@ -121,30 +118,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     for (unsigned i = 0; i < p.numCells3dVertex; i++)
     {
         // Create cell cycle model - generational or simple based on config
-        AbstractCellCycleModel* p_cycle_base;
-        if (p.enableGenerationalCascade)
-        {
-            auto* p_cycle = new UniformContactInhibitionGenerationalCellCycleModel();
-            p_cycle->SetDimension(3);
-            p_cycle->SetQuiescentVolumeFraction(p.quiescentFraction);
-            p_cycle->SetEquilibriumVolume(avgVol);
-            p_cycle->SetTotalCycleMin(p.stemCycleMin);
-            p_cycle->SetTotalCycleMax(p.stemCycleMax);
-            p_cycle->SetTransitCycleRatio(p.taCycleRatio);
-            p_cycle->SetMaxTransitGenerations(p.maxTransitGenerations);
-            p_cycle_base = p_cycle;
-        }
-        else
-        {
-            auto* p_cycle = new UniformContactInhibitionCellCycleModel();
-            p_cycle->SetDimension(3);
-            p_cycle->SetQuiescentVolumeFraction(p.quiescentFraction);
-            p_cycle->SetEquilibriumVolume(avgVol);
-            p_cycle->SetTotalCycleMin(p.stemCycleMin);
-            p_cycle->SetTotalCycleMax(p.stemCycleMax);
-            p_cycle->SetTransitCycleRatio(p.taCycleRatio);
-            p_cycle_base = p_cycle;
-        }
+        AbstractCellCycleModel* p_cycle_base = CreateCellCycleModel(p, 3, avgVol);
 
         // Uniform random cell type assignment across the organoid surface
         double u = RandomNumberGenerator::Instance()->ranf();
@@ -176,16 +150,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
         p_cell->GetCellData()->SetItem("cell_type_id", type_id);
 
         // For generational model, set initial generation based on cell type
-        if (p.enableGenerationalCascade)
-        {
-            auto* p_gen_cycle = static_cast<UniformContactInhibitionGenerationalCellCycleModel*>(p_cycle_base);
-            if (p_type->IsType<StemCellProliferativeType>())
-                p_gen_cycle->SetGeneration(0);
-            else if (p_type->IsType<TransitCellProliferativeType>())
-                p_gen_cycle->SetGeneration(1);  // TA cells start at generation 1
-            else
-                p_gen_cycle->SetGeneration(p.maxTransitGenerations + 1);  // Already differentiated
-        }
+        SetInitialGeneration(p_cell, p_cycle_base, p);
 
         p_cell->SetBirthTime(-RandomNumberGenerator::Instance()->ranf() * 10.0);
         p_cell->InitialiseCellCycleModel();
@@ -297,14 +262,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
                 -p.ecmDomainHalf, p.ecmDomainHalf,
                 -p.ecmDomainHalf, p.ecmDomainHalf,
                 "cubic"));
-            pVeField->SetRelaxedStiffness(p.ghostRelaxedStiffness);
-            pVeField->SetRelaxationModulus(p.ghostRelaxationModulus);
-            pVeField->SetRelaxationTime(p.ghostRelaxationTime);
-            pVeField->SetGhostDamping(p.ghostDamping);
-            pVeField->SetDegradationRate(p.ecmDegradationRate);
-            pVeField->SetRemovalThreshold(p.ghostRemovalThreshold);
-            pVeField->SetFibreRemodelingRate(p.ghostFibreRemodelingRate);
-            pVeField->SetAnisotropyStrength(p.ghostAnisotropyStrength);
+            ConfigureViscoelasticField(pVeField, p);
 
             pVeField->ClearDensityInsideRadius(center3d, ecm_clear_radius);
 
@@ -326,13 +284,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
                 -p.ecmDomainHalf, p.ecmDomainHalf,
                 -p.ecmDomainHalf, p.ecmDomainHalf,
                 "cubic"));
-            pGhostField->SetGhostGhostStiffness(p.ghostGhostStiffness);
-            pGhostField->SetGhostDamping(p.ghostDamping);
-            pGhostField->SetDegradationRate(p.ecmDegradationRate);
-            pGhostField->SetRemovalThreshold(p.ghostRemovalThreshold);
-            pGhostField->SetFibreRemodelingRate(p.ghostFibreRemodelingRate);
-            pGhostField->SetAnisotropyStrength(p.ghostAnisotropyStrength);
-            pGhostField->SetGhostRestLength(gn_rest);
+            ConfigureGhostField(pGhostField, p, gn_rest);
 
             pGhostField->ClearDensityInsideRadius(center3d, ecm_clear_radius);
 
@@ -383,7 +335,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
 
     double totalSimTime = p.enableRelaxation ? (p.relaxationTime + p.endTime) : p.endTime;
     boost::shared_ptr<CryptBuddingSummaryModifier<3>> p_summary(
-        new CryptBuddingSummaryModifier<3>(p.ecmConfinementStiffness, p.samplingMultiple,
+        new CryptBuddingSummaryModifier<3>(p.ecmStiffness, p.samplingMultiple,
                                            totalSimTime, avgVol));
     simulator.AddSimulationModifier(p_summary);
 
@@ -452,14 +404,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
             if (p.enableEcmConfinement)
             {
                 MAKE_PTR(ViscoelasticGhostNodeEcmForce<3>, p_ve_force);
-                p_ve_force->SetGhostField(pVeField);
-                p_ve_force->SetCellGhostStiffness(p.ghostCellGhostStiffness);
-                p_ve_force->SetCellGhostRestLength(p.ghostCellGhostRestLength);
-                p_ve_force->SetCellGhostCutoff(p.ghostCellGhostCutoff);
-                p_ve_force->SetDegradationEnabled(true);
-                p_ve_force->SetRemodelingEnabled(p.enableEcmGuidance);
-                p_ve_force->SetTrackCenter(true);
-                p_ve_force->SetRemovalCheckInterval(p.ghostRemovalCheckInterval);
+                ConfigureViscoelasticForce(p_ve_force, pVeField, p);
                 simulator.AddForce(p_ve_force);
             }
         }
@@ -468,14 +413,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
             if (p.enableEcmConfinement)
             {
                 MAKE_PTR(GhostNodeEcmForce<3>, p_gn_force);
-                p_gn_force->SetGhostField(pGhostField);
-                p_gn_force->SetCellGhostStiffness(p.ghostCellGhostStiffness);
-                p_gn_force->SetCellGhostRestLength(p.ghostCellGhostRestLength);
-                p_gn_force->SetCellGhostCutoff(p.ghostCellGhostCutoff);
-                p_gn_force->SetDegradationEnabled(true);
-                p_gn_force->SetRemodelingEnabled(p.enableEcmGuidance);
-                p_gn_force->SetTrackCenter(true);
-                p_gn_force->SetRemovalCheckInterval(p.ghostRemovalCheckInterval);
+                ConfigureGhostForce(p_gn_force, pGhostField, p);
                 simulator.AddForce(p_gn_force);
             }
         }
@@ -497,7 +435,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
             {
                 auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
                 p_ecm_conf->SetECMField(pEcmField);
-                p_ecm_conf->SetConfinementStiffness(p.ecmConfinementStiffness);
+                p_ecm_conf->SetConfinementStiffness(p.ecmStiffness);
                 p_ecm_conf->SetDegradationEnabled(true);
                 p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
                 p_ecm_conf->SetTrackCenter(true);
@@ -544,14 +482,8 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
                           << ", spacing=" << p.ecmGridSpacing << ")" << std::endl;
 
                 MAKE_PTR(GhostNodeEcmForce<3>, p_gn_force);
-                p_gn_force->SetGhostField(pGhostField);
-                p_gn_force->SetCellGhostStiffness(p.ghostCellGhostStiffness);
-                p_gn_force->SetCellGhostRestLength(p.ghostCellGhostRestLength);
-                p_gn_force->SetCellGhostCutoff(v3d_cutoff);
-                p_gn_force->SetDegradationEnabled(true);
-                p_gn_force->SetRemodelingEnabled(p.enableEcmGuidance);
-                p_gn_force->SetTrackCenter(true);
-                p_gn_force->SetRemovalCheckInterval(p.ghostRemovalCheckInterval);
+                ConfigureGhostForce(p_gn_force, pGhostField, p);
+                p_gn_force->SetCellGhostCutoff(v3d_cutoff);  // Override with vertex3d-specific cutoff
                 simulator.AddForce(p_gn_force);
             }
         }
@@ -573,7 +505,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
             {
                 auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
                 p_ecm_conf->SetECMField(pEcmField);
-                p_ecm_conf->SetConfinementStiffness(p.ecmConfinementStiffness);
+                p_ecm_conf->SetConfinementStiffness(p.ecmStiffness);
                 p_ecm_conf->SetDegradationEnabled(true);
                 p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
                 p_ecm_conf->SetTrackCenter(true);
@@ -585,19 +517,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
         simulator.Solve();
     }
 
-    unsigned final_cells = population.GetNumRealCells();
-    std::cout << "\nSIMULATION COMPLETE  |  Final cells: " << final_cells << std::endl;
-
-    // Print profiling summary
-    SimProfiler::Instance().PrintSummary();
-
-    // Also save CSV for further analysis
-    OutputFileHandler prof_handler(outputDir, false);
-    std::string profCsvPath = prof_handler.GetOutputDirectoryFullPath() + "profiler.csv";
-    SimProfiler::Instance().WriteSummaryCSV(profCsvPath);
-
-    if (final_cells == 0)
-        EXCEPTION("Simulation ended with zero cells");
+    PrintSimulationSummary<3>(population, outputDir);
 }
 
 #endif // RUNVERTEX3D_HPP_

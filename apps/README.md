@@ -2,6 +2,99 @@
 
 This document maps configuration parameters to their corresponding C++ classes.
 
+## Unit Conversion System
+
+Parameters can be defined in physical units (kPa, Pa·s, etc.) and automatically converted to simulation units using the tissue viscosity and cell diameter.
+
+### Configuration
+
+Three parameters control unit conversion in the `unitConversion` section:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `usePhysicalUnits` | bool | false | Enable/disable physical unit conversion |
+| `cellDiameterMicrometers` | double | 10.0 | Cell diameter in micrometers (typical 8-15 µm) |
+| `tissueViscosityPaS` | double | 1.0 | Tissue viscosity in Pa·s (typical 0.1-10 Pa·s) |
+
+### Conversion Formula
+
+When `usePhysicalUnits=true`, parameters are converted from physical units to simulation units as follows:
+
+```
+cellRadiusMeters = cellDiameterMicrometers × 1e-6 / 2
+dragCoeff = 6π × tissueViscosityPaS × cellRadiusMeters  (Pa·s·m)
+stiffnessConversionFactor = dragCoeff / cellDiameterMeters
+pressureConversionFactor = dragCoeff  (Pa·s·m)
+```
+
+All stiffness parameters (Pa) are multiplied by `stiffnessConversionFactor`:
+- `ecmStiffness`, `springStiffness`, `bendingStiffness`
+- `ghostGhostStiffness`, `ghostCellGhostStiffness`, `ghostRelaxedStiffness`, `ghostRelaxationModulus`
+- Nagai-Honda surface tensions: `gammaApical`, `gammaBasal`, `gammaLateral`
+- Adhesion parameters: `nhMembraneSurface`, `nhCellCellAdhesion`, `nhBoundaryAdhesion`, per-type adhesions
+
+Pressure/force-like parameters (Pa) are multiplied by `pressureConversionFactor`:
+- `lumenPressure`, `apicalConstrictionStrength`
+- `polarityBendingStrength`
+
+### Examples
+
+#### Example 1: Non-dimensional (backward compatible, default)
+
+```json
+{
+  "unitConversion": {
+    "usePhysicalUnits": false,
+    "cellDiameterMicrometers": 10.0,
+    "tissueViscosityPaS": 1.0
+  },
+  "ECM": {
+    "ecmStiffness": 5.0
+  }
+}
+```
+
+Simulation uses `ecmStiffness = 5.0` directly (no conversion).
+
+#### Example 2: Physical units (10 µm cells, 1 Pa·s tissue)
+
+```json
+{
+  "unitConversion": {
+    "usePhysicalUnits": true,
+    "cellDiameterMicrometers": 10.0,
+    "tissueViscosityPaS": 1.0
+  },
+  "ECM": {
+    "ecmStiffness": 1000.0
+  }
+}
+```
+
+With these parameters:
+- `dragCoeff = 6π × 1.0 × (5×10^-6) ≈ 9.42×10^-5 Pa·s·m`
+- `stiffnessConversionFactor = 9.42×10^-5 / 10×10^-6 ≈ 9.42`
+- `ecmStiffness` in simulation units = `1000.0 × 9.42 ≈ 9420`
+
+This represents a 1 kPa (1000 Pa) ECM in physical units.
+
+#### Example 3: Softer tissue (softer cells, higher viscosity)
+
+```json
+{
+  "unitConversion": {
+    "usePhysicalUnits": true,
+    "cellDiameterMicrometers": 15.0,
+    "tissueViscosityPaS": 5.0
+  },
+  "ECM": {
+    "ecmStiffness": 500.0
+  }
+}
+```
+
+Larger cells and higher viscosity increase the drag coefficient, which scales all parameters up.
+
 ## Feature Toggles → C++ Classes
 
 | Parameter | C++ Class | Notes |
@@ -88,8 +181,8 @@ Several parameters are **auto-derived** in `Finalise()` and will silently overri
 | Model | Default dt | Condition |
 |-------|-----------|-----------|
 | `node2d` | `0.005` | Always |
-| `vertex2d` | `0.0002` | `ecmConfinementStiffness < 1.0` |
-| `vertex2d` | `0.0005` | `ecmConfinementStiffness ≥ 1.0` |
+| `vertex2d` | `0.0002` | `ecmStiffness < 1.0` |
+| `vertex2d` | `0.0005` | `ecmStiffness ≥ 1.0` |
 | `node3d` | `0.01` | Always |
 | `vertex3d` | `0.0001` | Always |
 
@@ -101,8 +194,8 @@ Defaults to `168.0` hours for `vertex2d`, `node3d`, and `vertex3d` if not set in
 
 | Condition | Default |
 |-----------|---------|
-| `ecmConfinementStiffness < 2.0` | `0.2` |
-| `ecmConfinementStiffness ≥ 2.0` | `0.15` |
+| `ecmStiffness < 2.0` | `0.2` |
+| `ecmStiffness ≥ 2.0` | `0.15` |
 
 Lower values delay T1 swaps (more tolerant of short edges). Higher stiffness → lower threshold because stiffer ECM compresses edges less.
 

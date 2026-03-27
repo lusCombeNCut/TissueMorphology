@@ -26,9 +26,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
-#include <iomanip>
 #include <map>
-#include <set>
 #include <functional>
 
 struct CryptBuddingParams
@@ -37,29 +35,6 @@ struct CryptBuddingParams
     double ecmStiffness;
     unsigned runNumber;
     unsigned randomSeed;
-    int verbosity;  // 0=quiet, 1=normal, 2=verbose
-
-    // ── Unit conversion system ───────────────────────────────────
-    // When usePhysicalUnits=true, parameters are converted from physical units
-    // (kPa, Pa, N/m, etc.) to simulation units.
-    //
-    // CHASTE solves: v_sim = F_sim  (overdamped, η_sim = 1)
-    // Physical mapping: v_phys = v_sim * (L0/T0),  F_phys = F_sim * η_phys * (L0/T0)
-    // Therefore:  k_phys [N/m] = k_sim * η_phys / T0
-    //             P_phys [Pa]  = P_sim * η_phys / (T0 * L0)
-    //
-    // η_phys is estimated from empirical traction force data:
-    //   η_phys = F_ref / v_ref
-    // where F_ref = typical traction force (nN) and v_ref = typical migration speed (µm/h).
-    // For epithelial cells: ~10 nN at ~10 µm/h → η ≈ 3.6 N·s/m
-    // This is ~40,000× higher than Stokes drag in water, reflecting focal adhesion coupling.
-    //
-    // Default values maintain backward compatibility (usePhysicalUnits=false).
-    bool usePhysicalUnits;                      // Enable/disable physical unit conversion
-    double cellDiameterMicrometers;             // Cell diameter in µm (default 10 µm)
-    double referenceForcenN;                    // Typical traction force in nN (default 10 nN)
-    double referenceVelocityUmPerH;             // Typical migration speed in µm/h (default 10 µm/h)
-    double ecmElasticModulusPa;                 // ECM elastic modulus in Pa (optional; overrides ecmStiffness if > 0)
 
     bool enableLumenPressure;
     bool enableApicalConstriction;
@@ -149,13 +124,16 @@ struct CryptBuddingParams
     std::string ecmGridType;     // "square" or "hex"
     double ecmSpringRestLength;      // Rest length for cell-ECM springs (0 = adhesion to ECM position)
     double ecmInteractionCutoff;     // Cutoff distance for cell-ECM spring interactions
+    double ecmConfinementStiffness;  // Spring stiffness for cell-ECM agent interactions (defaults to ecmStiffness)
 
     // Ghost node ECM (off-lattice particle-based ECM)
     bool enableGhostNodeECM;            // Use ghost nodes instead of grid-based ECM
+    double ghostGhostStiffness;         // ECM-ECM spring stiffness
     double ghostDamping;                // ECM node viscous damping coefficient
     double ghostRemovalThreshold;       // Density below which ghost nodes are removed
     double ghostFibreRemodelingRate;    // Rate of fibre reorientation by cell traction
     double ghostAnisotropyStrength;     // Fibre anisotropy factor [0,1]
+    double ghostCellGhostStiffness;     // Cell-ghost spring stiffness
     double ghostCellGhostRestLength;    // Cell-ghost spring rest length
     double ghostCellGhostCutoff;        // Cell-ghost interaction cutoff
     double ghostSpringRestLength;       // ECM-ECM spring rest length
@@ -167,9 +145,6 @@ struct CryptBuddingParams
     double ghostRelaxedStiffness;           // Long-time (relaxed) modulus E0
     double ghostRelaxationModulus;          // Transient modulus E1
     double ghostRelaxationTime;             // Relaxation time tau (hours)
-
-    // Dynamic ghost node boundary expansion
-    bool enableGhostBoundaryExpansion;      // Dynamically add ghost nodes when cells approach domain boundary
 
     double t1Threshold2d;
     double t2Threshold2d;
@@ -223,168 +198,11 @@ struct CryptBuddingParams
     bool t1ThresholdOverridden;
     bool t2ThresholdOverridden;
 
-    // Keys explicitly loaded from config file (populated by ApplyConfigMap)
-    std::set<std::string> mLoadedKeys;
-
-    /**
-     * Compute and apply unit conversion factors if usePhysicalUnits is enabled.
-     *
-     * Converts parameters from physical units to simulation units using:
-     *   - L0 = cellDiameterMicrometers * 1e-6 (metres), T0 = 3600 s
-     *   - η_phys = referenceForcenN * 1e-9 / (referenceVelocityUmPerH * 1e-6 / T0)
-     *   - k_factor = η_phys / T0,  P_factor = η_phys / (T0 * L0)
-     *
-     * If usePhysicalUnits is false, no conversion is applied but a table is still printed
-     * showing the sim values alongside their physical equivalents (sim × factor).
-     *
-     * Called from ApplyConfigMap() after all parameters are loaded from config files.
-     * This ensures conversion is applied only to parameters that were explicitly set.
-     */
-    void ComputeConversionFactors()
-    {
-        const double L0 = cellDiameterMicrometers * 1e-6;  // cell diameter in metres
-        const double T0 = 3600.0;                           // 1 hour in seconds
-
-        // Effective tissue damping from traction force data:
-        //   η_phys = F_ref / v_ref
-        const double f_ref_N  = referenceForcenN * 1e-9;
-        const double v_ref_ms = (referenceVelocityUmPerH * 1e-6) / T0;
-        const double etaPhys  = f_ref_N / v_ref_ms;  // N·s/m
-
-        // Conversion factors (physical = sim × factor):
-        //   k_phys [N/m]  = k_sim  × η_phys / T0
-        //   P_phys [Pa]   = P_sim  × η_phys / (T0 × L0)
-        //   κ_phys [N·m]  = κ_sim  × L0²   (geometric scaling)
-        const double kF = etaPhys / T0;        // stiffness: N/m per sim unit
-        const double pF = etaPhys / (T0 * L0); // pressure:  Pa per sim unit
-        const double bF = L0 * L0;             // bending:   N·m per sim unit
-
-        if (usePhysicalUnits)
-        {
-            // If elastic modulus is specified, derive ecmStiffness:
-            //   k [N/m] = E [Pa] × L0 [m]  →  k_sim = (E × L0) / kF
-            if (ecmElasticModulusPa > 0.0)
-                ecmStiffness = (ecmElasticModulusPa * L0) / kF;
-
-            // Convert physical → sim (divide by factor)
-            ecmStiffness             /= kF;
-            springStiffness          /= kF;
-            bendingStiffness         /= bF;
-            ghostRelaxedStiffness    /= kF;
-            ghostRelaxationModulus   /= kF;
-            gammaApical              /= kF;
-            gammaBasal               /= kF;
-            gammaLateral             /= kF;
-            lumenPressure            /= pF;
-            apicalConstrictionStrength /= pF;
-            polarityBendingStrength  /= pF;
-            nhMembraneSurface        /= kF;
-            nhCellCellAdhesion       /= kF;
-            nhBoundaryAdhesion       /= kF;
-            nhStemStemAdhesion       /= kF;
-            nhStemTransitAdhesion    /= kF;
-            nhStemDiffAdhesion       /= kF;
-            nhTransitTransitAdhesion /= kF;
-            nhTransitDiffAdhesion    /= kF;
-            nhDiffDiffAdhesion       /= kF;
-            nhStemBoundaryAdhesion   /= kF;
-            nhTransitBoundaryAdhesion /= kF;
-            nhDiffBoundaryAdhesion   /= kF;
-        }
-
-    }
-
-    /**
-     * Print a table of key force/stiffness parameters with their physical equivalents.
-     * When usePhysicalUnits=false: sim → physical (useful for debugging)
-     * When usePhysicalUnits=true:  already-converted sim values with the physical
-     *                              inputs they came from.
-     *
-     * Call from CryptBuddingApp.cpp after ParseArguments() so verbosity is known.
-     * Suggested: call when verbosity >= 2 (via -v) or always when usePhysicalUnits=true.
-     */
-    void PrintUnitTable() const
-    {
-        const double L0 = cellDiameterMicrometers * 1e-6;
-        const double T0 = 3600.0;
-        const double f_ref_N  = referenceForcenN * 1e-9;
-        const double v_ref_ms = (referenceVelocityUmPerH * 1e-6) / T0;
-        const double etaPhys  = f_ref_N / v_ref_ms;
-        const double kF = etaPhys / T0;
-        const double pF = etaPhys / (T0 * L0);
-        const double bF = L0 * L0;
-
-        auto row = [&](const std::string& name,
-                       double sim, const std::string& physUnit,
-                       double phys)
-        {
-            std::cout << "  " << std::left << std::setw(34) << name
-                      << std::right << std::setw(14) << std::scientific << std::setprecision(4) << sim
-                      << "  (sim)  →  "
-                      << std::right << std::setw(12) << std::scientific << std::setprecision(4) << phys
-                      << "  " << physUnit << "\n";
-        };
-
-        std::cout << "\n── Parameter Units Table ───────────────────────────────────────────────────\n";
-        std::cout << "  Mode: " << (usePhysicalUnits ? "physical input converted to sim" : "sim input → physical equivalents") << "\n";
-        std::cout << "  Cell diameter: " << cellDiameterMicrometers << " um"
-                  << "   η_phys: " << etaPhys << " N·s/m"
-                  << "   L0: " << L0 << " m   T0: " << T0 << " s\n";
-        std::cout << "  Stiffness factor: " << kF << " N/m per sim unit"
-                  << "   Pressure factor: " << pF << " Pa per sim unit\n";
-        std::cout << "  " << std::string(76, '-') << "\n";
-        std::cout << "  " << std::left << std::setw(34) << "Parameter"
-                  << std::right << std::setw(14) << "Sim value"
-                  << "           "
-                  << std::right << std::setw(12) << "Physical"
-                  << "  Units\n";
-        std::cout << "  " << std::string(76, '-') << "\n";
-
-        if (ecmElasticModulusPa > 0.0)
-            std::cout << "  " << std::left << std::setw(34) << "ecmElasticModulusPa (input)"
-                      << "  " << std::scientific << std::setprecision(4) << ecmElasticModulusPa << "  Pa\n";
-
-        row("ecmStiffness",              ecmStiffness,              "N/m",  ecmStiffness * kF);
-        row("springStiffness",           springStiffness,           "N/m",  springStiffness * kF);
-        row("bendingStiffness",          bendingStiffness,          "N·m",  bendingStiffness * bF);
-        row("ghostRelaxedStiffness",     ghostRelaxedStiffness,     "N/m",  ghostRelaxedStiffness * kF);
-        row("ghostRelaxationModulus",    ghostRelaxationModulus,    "N/m",  ghostRelaxationModulus * kF);
-        row("gammaApical",               gammaApical,               "N/m",  gammaApical * kF);
-        row("gammaBasal",                gammaBasal,                "N/m",  gammaBasal * kF);
-        row("gammaLateral",              gammaLateral,              "N/m",  gammaLateral * kF);
-        row("lumenPressure",             lumenPressure,             "Pa",   lumenPressure * pF);
-        row("apicalConstrictionStrength",apicalConstrictionStrength,"Pa",   apicalConstrictionStrength * pF);
-        row("polarityBendingStrength",   polarityBendingStrength,   "Pa",   polarityBendingStrength * pF);
-        row("nhMembraneSurface",         nhMembraneSurface,         "N/m",  nhMembraneSurface * kF);
-        row("nhCellCellAdhesion",        nhCellCellAdhesion,        "N/m",  nhCellCellAdhesion * kF);
-        row("nhBoundaryAdhesion",        nhBoundaryAdhesion,        "N/m",  nhBoundaryAdhesion * kF);
-        row("nhStemStemAdhesion",        nhStemStemAdhesion,        "N/m",  nhStemStemAdhesion * kF);
-        row("nhStemTransitAdhesion",     nhStemTransitAdhesion,     "N/m",  nhStemTransitAdhesion * kF);
-        row("nhStemDiffAdhesion",        nhStemDiffAdhesion,        "N/m",  nhStemDiffAdhesion * kF);
-        row("nhTransitTransitAdhesion",  nhTransitTransitAdhesion,  "N/m",  nhTransitTransitAdhesion * kF);
-        row("nhTransitDiffAdhesion",     nhTransitDiffAdhesion,     "N/m",  nhTransitDiffAdhesion * kF);
-        row("nhDiffDiffAdhesion",        nhDiffDiffAdhesion,        "N/m",  nhDiffDiffAdhesion * kF);
-        row("nhStemBoundaryAdhesion",    nhStemBoundaryAdhesion,    "N/m",  nhStemBoundaryAdhesion * kF);
-        row("nhTransitBoundaryAdhesion", nhTransitBoundaryAdhesion, "N/m",  nhTransitBoundaryAdhesion * kF);
-        row("nhDiffBoundaryAdhesion",    nhDiffBoundaryAdhesion,    "N/m",  nhDiffBoundaryAdhesion * kF);
-
-        std::cout << "  " << std::string(76, '-') << "\n\n";
-    }
-
     void SetDefaults()
     {
         modelType = "";
         ecmStiffness = 5.0;
         runNumber = 0;
-        verbosity = 1;
-
-        // Unit conversion defaults (disabled by default for backward compatibility)
-        usePhysicalUnits = false;
-        cellDiameterMicrometers    = 10.0;   // Typical mammalian epithelial cell: 10 µm
-        referenceForcenN           = 10.0;   // Typical epithelial traction force: ~10 nN
-        referenceVelocityUmPerH    = 10.0;   // Typical migration speed: ~10 µm/h (= 1 CD/h)
-        ecmElasticModulusPa        = -1.0;   // Sentinel: disabled (use ecmStiffness directly)
-
         enableLumenPressure = true;
         enableApicalConstriction = true;
         enableEcmGuidance = false;
@@ -409,8 +227,6 @@ struct CryptBuddingParams
         numCells2dVertex    = 40;
         innerRadius2d       = 6.0;
         outerRadius2d       = 8.0;
-        t1Threshold2d       = 0.01;   // Chaste default; override via JSON "t1Threshold2d"
-        t2Threshold2d       = 0.001;  // Chaste default; override via JSON "t2Threshold2d"
         interactionCutoff2d = 2.5;
 
         numCells3dNode       = 100;
@@ -427,7 +243,7 @@ struct CryptBuddingParams
 
         lumenPressure          = 2.0;
 
-        apicalConstrictionStrength = 0.2;
+        apicalConstrictionStrength = 3.0;
 
         springStiffness       = 30.0;
         springCutoff          = 1.5;
@@ -470,14 +286,17 @@ struct CryptBuddingParams
         ecmGridType    = "hex";   // "square" or "hex"
         ecmSpringRestLength      = 0.0;    // Rest length for cell-ECM springs
         ecmInteractionCutoff     = 1.5;    // Cutoff distance for cell-ECM interactions
+        ecmConfinementStiffness  = -1.0;   // sentinel: falls back to ecmStiffness in Finalise()
 
         // Ghost node ECM defaults
         enableGhostNodeECM          = true;
+        ghostGhostStiffness         = 15.0;
         ghostDamping                = 5.0;
         ghostRemovalThreshold       = 0.05;
         ghostFibreRemodelingRate    = 0.1;
         ghostAnisotropyStrength     = 0.5;
-        ghostCellGhostRestLength    = 1.0;
+        ghostCellGhostStiffness     = 10.0;
+        ghostCellGhostRestLength    = 0.0;
         ghostCellGhostCutoff        = 1.5;
         ghostSpringRestLength       = -1.0;  // sentinel: auto-derive from grid spacing
         ghostGridSpacing            = -1.0;  // sentinel: defaults to ghostSpringRestLength (or ecmGridSpacing if rest length also unset)
@@ -488,9 +307,6 @@ struct CryptBuddingParams
         ghostRelaxedStiffness       = 5.0;    // E0: long-time modulus
         ghostRelaxationModulus      = 1.0;    // E1: transient modulus
         ghostRelaxationTime         = 1.0;    // tau: relaxation time (hours)
-
-        // Dynamic ghost node boundary expansion
-        enableGhostBoundaryExpansion = false;
 
         // Curvature bending force (Drasdo 2000 - monolayer enforcement)
         enableCurvatureBending    = true;   // Enable by default for node2d
@@ -533,7 +349,12 @@ struct CryptBuddingParams
 
     void Finalise()
     {
-        randomSeed = static_cast<unsigned>(ecmStiffness * 10000) + runNumber * 137;
+        // Unify all ECM stiffness parameters from the single ecmStiffness knob
+        ecmConfinementStiffness = ecmStiffness;
+        ghostGhostStiffness     = ecmStiffness;
+        ghostCellGhostStiffness = ecmStiffness;
+
+        randomSeed = static_cast<unsigned>(ecmConfinementStiffness * 10000) + runNumber * 137;
 
         // Derive organoidRadius2d from numCells so spacing = rest length (1.0)
         // spacing = 2πR / N = 1.0  →  R = N / (2π)
@@ -626,125 +447,6 @@ struct CryptBuddingParams
         samplingMultiple = std::max(1u, totalSteps / 50);
     }
 
-    /**
-     * Cross-validate parameters after Finalise(). Throws EXCEPTION on
-     * invalid combinations. Call after Finalise(), before entering a runner.
-     */
-    void Validate() const
-    {
-        // ── Model type must be recognised ────────────────────────────
-        if (modelType != "node2d" && modelType != "vertex2d" &&
-            modelType != "node3d" && modelType != "vertex3d")
-        {
-            EXCEPTION("Unknown modelType: \"" + modelType + "\". "
-                      "Expected node2d, vertex2d, node3d, or vertex3d.");
-        }
-
-        // ── Positive time stepping ───────────────────────────────────
-        if (dt <= 0.0)
-            EXCEPTION("dt must be positive (got " + std::to_string(dt) + ")");
-        if (endTime <= 0.0)
-            EXCEPTION("endTime must be positive (got " + std::to_string(endTime) + ")");
-        if (enableRelaxation && relaxationTime <= 0.0)
-            EXCEPTION("enableRelaxation is true but relaxationTime <= 0");
-
-        // ── Cell fraction sanity ─────────────────────────────────────
-        double totalFraction = stemFraction + transitFraction;
-        if (enableStochasticFourType)
-            totalFraction += panethFraction;
-        if (totalFraction > 1.0 + 1e-9)
-            EXCEPTION("Cell type fractions sum to " + std::to_string(totalFraction)
-                      + " (must be <= 1.0)");
-
-        // ── Mutually exclusive cell cycle models ─────────────────────
-        if (enableStochasticFourType && enableGenerationalCascade)
-            EXCEPTION("enableStochasticFourType and enableGenerationalCascade "
-                      "are mutually exclusive — set at most one to true.");
-
-        // ── Cell cycle ranges ────────────────────────────────────────
-        if (stemCycleMin > stemCycleMax)
-            EXCEPTION("stemCycleMin (" + std::to_string(stemCycleMin)
-                      + ") > stemCycleMax (" + std::to_string(stemCycleMax) + ")");
-
-        // ── Ghost node ECM constraints ───────────────────────────────
-        if (enableViscoelasticECM && !enableGhostNodeECM)
-            EXCEPTION("enableViscoelasticECM requires enableGhostNodeECM=true");
-
-        // ── Geometry sanity ──────────────────────────────────────────
-        if ((modelType == "node2d" || modelType == "vertex2d") && numCells2dNode < 3 && modelType == "node2d")
-            EXCEPTION("numCells2dNode must be >= 3 for a ring (got "
-                      + std::to_string(numCells2dNode) + ")");
-        if (modelType == "vertex2d" && numCells2dVertex < 3)
-            EXCEPTION("numCells2dVertex must be >= 3 (got "
-                      + std::to_string(numCells2dVertex) + ")");
-        if (modelType == "node3d" && numCells3dNode < 4)
-            EXCEPTION("numCells3dNode must be >= 4 for a sphere (got "
-                      + std::to_string(numCells3dNode) + ")");
-
-        // ── Stiffness/force parameters should be non-negative ────────
-        if (ecmStiffness < 0.0)
-            EXCEPTION("ecmStiffness must be >= 0 (got " + std::to_string(ecmStiffness) + ")");
-        if (springStiffness < 0.0)
-            EXCEPTION("springStiffness must be >= 0 (got " + std::to_string(springStiffness) + ")");
-
-        std::cout << "Parameter validation passed." << std::endl;
-    }
-
-    /**
-     * Print warnings for boolean feature flags that were NOT set in the config
-     * file and therefore kept their (potentially unexpected) compiled-in default.
-     * Only flags whose default is TRUE are flagged — these silently add forces.
-     */
-    void PrintDefaultsWarning() const
-    {
-        // Feature flags whose compiled-in default is TRUE (i.e. force/feature is ON
-        // unless the user explicitly disables it in the config file).
-        static const std::vector<std::pair<std::string, bool>> kFeatureDefaults = {
-            {"enableLumenPressure",       true},
-            {"enableApicalConstriction",  true},
-            {"enableRelaxation",          true},
-            {"enableDifferentialAdhesion",true},
-            {"enableEcmConfinement",      true},
-            {"enableLumenHole",           true},
-            {"enableGhostNodeECM",        true},
-            {"enableViscoelasticECM",     true},
-            {"enableCurvatureBending",    true},
-        };
-
-        std::vector<std::string> warnings;
-        for (const auto& kv : kFeatureDefaults)
-        {
-            if (mLoadedKeys.find(kv.first) == mLoadedKeys.end())
-            {
-                warnings.push_back(kv.first);
-            }
-        }
-
-        if (!warnings.empty())
-        {
-            std::cerr << "\n  WARNING: The following feature flags were NOT set in your config\n"
-                      << "  file and are using their compiled-in defaults (shown below).\n"
-                      << "  Add them explicitly to suppress this warning.\n\n";
-            for (const auto& name : warnings)
-            {
-                // Look up current (default) value
-                bool val = false;
-                if (name == "enableLumenPressure")        val = enableLumenPressure;
-                else if (name == "enableApicalConstriction") val = enableApicalConstriction;
-                else if (name == "enableRelaxation")      val = enableRelaxation;
-                else if (name == "enableDifferentialAdhesion") val = enableDifferentialAdhesion;
-                else if (name == "enableEcmConfinement")  val = enableEcmConfinement;
-                else if (name == "enableLumenHole")       val = enableLumenHole;
-                else if (name == "enableGhostNodeECM")    val = enableGhostNodeECM;
-                else if (name == "enableViscoelasticECM") val = enableViscoelasticECM;
-                else if (name == "enableCurvatureBending") val = enableCurvatureBending;
-                std::cerr << "    " << std::left << std::setw(32) << name
-                          << " [default: " << (val ? "true" : "false") << "]\n";
-            }
-            std::cerr << std::endl;
-        }
-    }
-
 private:
     /**
      * Apply a flat key→value map to all parameters.
@@ -757,23 +459,22 @@ private:
                 std::string v = configMap.at(key);
                 std::transform(v.begin(), v.end(), v.begin(), ::tolower);
                 var = (v == "true" || v == "1" || v == "yes" || v == "on");
-                mLoadedKeys.insert(key);
             }
         };
         auto getDouble = [&](const std::string& key, double& var) {
             if (configMap.count(key)) {
-                try { var = std::stod(configMap.at(key)); mLoadedKeys.insert(key); }
+                try { var = std::stod(configMap.at(key)); }
                 catch (...) { std::cerr << "Warning: Invalid double for " << key << std::endl; }
             }
         };
         auto getUnsigned = [&](const std::string& key, unsigned& var) {
             if (configMap.count(key)) {
-                try { var = static_cast<unsigned>(std::stoul(configMap.at(key))); mLoadedKeys.insert(key); }
+                try { var = static_cast<unsigned>(std::stoul(configMap.at(key))); }
                 catch (...) { std::cerr << "Warning: Invalid unsigned for " << key << std::endl; }
             }
         };
         auto getString = [&](const std::string& key, std::string& var) {
-            if (configMap.count(key)) { var = configMap.at(key); mLoadedKeys.insert(key); }
+            if (configMap.count(key)) var = configMap.at(key);
         };
 
         // ── Simulation ───────────────────────────────────────────────
@@ -781,13 +482,6 @@ private:
         getDouble("ecmStiffness", ecmStiffness);
         getUnsigned("runNumber", runNumber);
         getUnsigned("randomSeed", randomSeed);
-
-        // ── Unit conversion (load first, before stiffness/pressure parameters) ──
-        getBool("usePhysicalUnits", usePhysicalUnits);
-        getDouble("cellDiameterMicrometers", cellDiameterMicrometers);
-        getDouble("referenceForcenN", referenceForcenN);
-        getDouble("referenceVelocityUmPerH", referenceVelocityUmPerH);
-        getDouble("ecmElasticModulusPa", ecmElasticModulusPa);
 
         // ── Feature toggles ──────────────────────────────────────────
         getBool("enableLumenPressure", enableLumenPressure);
@@ -804,7 +498,6 @@ private:
         getBool("enableContinuousPvd", enableContinuousPvd);
         getBool("enableGhostNodeECM", enableGhostNodeECM);
         getBool("enableViscoelasticECM", enableViscoelasticECM);
-        getBool("enableGhostBoundaryExpansion", enableGhostBoundaryExpansion);
 
         // ── Time stepping ────────────────────────────────────────────
         if (configMap.count("dt"))      { getDouble("dt", dt);           dtOverridden = true; }
@@ -878,12 +571,15 @@ private:
         getString("ecmGridType", ecmGridType);
         getDouble("ecmSpringRestLength", ecmSpringRestLength);
         getDouble("ecmInteractionCutoff", ecmInteractionCutoff);
+        getDouble("ecmConfinementStiffness", ecmConfinementStiffness);
 
         // ── Ghost node ECM ───────────────────────────────────────────
+        getDouble("ghostGhostStiffness", ghostGhostStiffness);
         getDouble("ghostDamping", ghostDamping);
         getDouble("ghostRemovalThreshold", ghostRemovalThreshold);
         getDouble("ghostFibreRemodelingRate", ghostFibreRemodelingRate);
         getDouble("ghostAnisotropyStrength", ghostAnisotropyStrength);
+        getDouble("ghostCellGhostStiffness", ghostCellGhostStiffness);
         getDouble("ghostCellGhostRestLength", ghostCellGhostRestLength);
         getDouble("ghostCellGhostCutoff", ghostCellGhostCutoff);
         getDouble("ghostSpringRestLength", ghostSpringRestLength);
@@ -918,9 +614,6 @@ private:
         getDouble("probTaToTaLate", probTaToTaLate);
         getDouble("transitionTime", transitionTime);
         getDouble("panethFraction", panethFraction);
-
-        // Apply unit conversion if enabled (must be called after all parameters loaded)
-        ComputeConversionFactors();
     }
 
 public:
@@ -1122,12 +815,6 @@ public:
         file << "runNumber = " << runNumber << "\n";
         file << "randomSeed = " << randomSeed << "\n\n";
 
-        file << "[UnitConversion]\n";
-        file << "usePhysicalUnits = " << (usePhysicalUnits ? "true" : "false") << "  # Enable/disable physical unit conversion\n";
-        file << "cellDiameterMicrometers = " << cellDiameterMicrometers << "  # Cell diameter in micrometers\n";
-        file << "referenceForcenN = " << referenceForcenN << "  # Reference traction force in nN\n";
-        file << "referenceVelocityUmPerH = " << referenceVelocityUmPerH << "  # Reference migration speed in um/h\n\n";
-
         file << "[Features]\n";
         file << "enableLumenPressure = " << (enableLumenPressure ? "true" : "false") << "\n";
         file << "enableApicalConstriction = " << (enableApicalConstriction ? "true" : "false") << "\n";
@@ -1142,7 +829,8 @@ public:
         file << "enableContinuousPvd = " << (enableContinuousPvd ? "true" : "false") << "  # Keep .pvd files valid during simulation\n\n";
 
         file << "[ECM]\n";
-        file << "ecmStiffness = " << ecmStiffness << "  # ECM spring stiffness (on-lattice: cell-ECM; off-lattice: ECM-ECM node)\n";
+        file << "ecmStiffness = " << ecmStiffness << "       # Legacy: only used by BasementMembraneForce in 3D models\n";
+        file << "ecmConfinementStiffness = " << ecmConfinementStiffness << "  # Spring stiffness for cell-ECM agent interactions\n";
         file << "ecmSpringRestLength = " << ecmSpringRestLength << "  # Rest length for cell-ECM springs\n";
         file << "ecmInteractionCutoff = " << ecmInteractionCutoff << "  # Cutoff distance for cell-ECM interactions\n";
         file << "bmStiffnessNode = " << bmStiffnessNode << "  # 3D only: BasementMembraneForce stiffness (derived from ecmStiffness)\n";
@@ -1249,13 +937,16 @@ public:
         file << "ecmGridType = " << ecmGridType << "\n";
         file << "ecmSpringRestLength = " << ecmSpringRestLength << "   # Rest length for cell-ECM springs\n";
         file << "ecmInteractionCutoff = " << ecmInteractionCutoff << "  # Cutoff for cell-ECM interactions\n";
+        file << "ecmConfinementStiffness = " << ecmConfinementStiffness << "  # Spring stiffness for cell-ECM agent interactions\n\n";
 
         file << "[GhostNodeECM]\n";
         file << "enableGhostNodeECM = " << (enableGhostNodeECM ? "true" : "false") << "  # Use off-lattice ghost node ECM instead of grid-based\n";
+        file << "ghostGhostStiffness = " << ghostGhostStiffness << "         # ECM-ECM spring stiffness\n";
         file << "ghostDamping = " << ghostDamping << "                # ECM node damping coefficient\n";
         file << "ghostRemovalThreshold = " << ghostRemovalThreshold << "       # Density below which ghost nodes are removed\n";
         file << "ghostFibreRemodelingRate = " << ghostFibreRemodelingRate << "    # Fibre reorientation rate\n";
         file << "ghostAnisotropyStrength = " << ghostAnisotropyStrength << "     # Fibre anisotropy factor [0,1]\n";
+        file << "ghostCellGhostStiffness = " << ghostCellGhostStiffness << "     # Cell-ghost spring stiffness\n";
         file << "ghostCellGhostRestLength = " << ghostCellGhostRestLength << "    # Cell-ghost spring rest length\n";
         file << "ghostCellGhostCutoff = " << ghostCellGhostCutoff << "        # Cell-ghost interaction cutoff\n";
         file << "ghostSpringRestLength = " << ghostSpringRestLength << "       # ECM-ECM spring rest length (-1 = auto)\n";
@@ -1266,7 +957,6 @@ public:
         file << "ghostRelaxedStiffness = " << ghostRelaxedStiffness << "       # E0: relaxed modulus\n";
         file << "ghostRelaxationModulus = " << ghostRelaxationModulus << "      # E1: transient modulus\n";
         file << "ghostRelaxationTime = " << ghostRelaxationTime << "          # tau: relaxation time (hours)\n";
-        file << "enableGhostBoundaryExpansion = " << (enableGhostBoundaryExpansion ? "true" : "false") << "  # Dynamically expand ghost domain when cells approach boundary\n";
 
         file.close();
         std::cout << "Saved parameters to: " << filePath << std::endl;
@@ -1301,14 +991,6 @@ public:
         f << "    \"randomSeed\": " << randomSeed << "\n";
         f << "  },\n";
 
-        // ── Unit conversion ──────────────────────────────────────────
-        f << "  \"unitConversion\": {\n";
-        f << "    \"usePhysicalUnits\": " << b(usePhysicalUnits) << ",\n";
-        f << "    \"cellDiameterMicrometers\": " << cellDiameterMicrometers << ",\n";
-        f << "    \"referenceForcenN\": " << referenceForcenN << ",\n";
-        f << "    \"referenceVelocityUmPerH\": " << referenceVelocityUmPerH << "\n";
-        f << "  },\n";
-
         // ── Feature toggles ──────────────────────────────────────────
         f << "  \"features\": {\n";
         f << "    \"enableLumenPressure\": " << b(enableLumenPressure) << ",\n";
@@ -1323,7 +1005,6 @@ public:
         f << "    \"enableLumenHole\": " << b(enableLumenHole) << ",\n";
         f << "    \"enableGhostNodeECM\": " << b(enableGhostNodeECM) << ",\n";
         f << "    \"enableViscoelasticECM\": " << b(enableViscoelasticECM) << ",\n";
-        f << "    \"enableGhostBoundaryExpansion\": " << b(enableGhostBoundaryExpansion) << ",\n";
         f << "    \"enableContinuousPvd\": " << b(enableContinuousPvd) << ",\n";
         f << "    \"useTopologyBasedSprings\": " << b(useTopologyBasedSprings) << "\n";
         f << "  },\n";
@@ -1373,8 +1054,6 @@ public:
         f << "    },\n";
 
         f << "    \"ECMConfinementForce\": {\n";
-        if (ecmElasticModulusPa > 0.0)
-            f << "      \"ecmElasticModulusPa\": " << ecmElasticModulusPa << ",\n";
         f << "      \"ecmStiffness\": " << ecmStiffness << ",\n";
         f << "      \"ecmSpringRestLength\": " << ecmSpringRestLength << ",\n";
         f << "      \"ecmInteractionCutoff\": " << ecmInteractionCutoff << ",\n";

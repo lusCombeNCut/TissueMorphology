@@ -74,15 +74,18 @@ int main(int argc, char* argv[])
             }
 
             params.Finalise();
-            PrintBanner(params);
+            params.Validate();
+            params.PrintDefaultsWarning();
+            if (params.usePhysicalUnits || params.verbosity >= 2)
+                params.PrintUnitTable();
+            if (params.verbosity >= 1)
+                PrintBanner(params);
 
             // Build output directory (includes git commit hash for traceability)
 #ifndef TM_GIT_HASH
 #define TM_GIT_HASH "unknown"
 #endif
-                 const double output_stiffness = params.enableGhostNodeECM
-                  ? params.ghostGhostStiffness
-                  : params.ecmConfinementStiffness;
+                 const double output_stiffness = params.ecmStiffness;
             std::stringstream subdir;
             subdir << "CryptBudding/" << TM_GIT_HASH
                    << "/" << params.modelType

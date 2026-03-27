@@ -15,12 +15,6 @@
 #include "NodeBasedCellPopulation.hpp"
 #include "OffLatticeSimulation.hpp"
 
-#include "UniformContactInhibitionCellCycleModel.hpp"
-#include "UniformContactInhibitionGenerationalCellCycleModel.hpp"
-#include "StochasticFourTypeCellCycleModel.hpp"
-#include "TransitCellProliferativeType.hpp"
-#include "StemCellProliferativeType.hpp"
-#include "DifferentiatedCellProliferativeType.hpp"
 #include "WildTypeCellMutationState.hpp"
 #include "TACellMutationState.hpp"
 #include "PanethCellMutationState.hpp"
@@ -38,21 +32,15 @@
 #include "ViscoelasticGhostNodeEcmField.hpp"
 #include "ViscoelasticGhostNodeEcmForce.hpp"
 #include "ViscoelasticGhostNodeEcmWriter.hpp"
-#include "ContinuousPvdModifier.hpp"
 #include "RingOutlineWriter.hpp"
-#include "LumenPressureForce.hpp"
-#include "ApicalConstrictionForce.hpp"
-#include "CellPolarityForce.hpp"
 #include "RingSmoothingForce.hpp"
 #include "RingTopologyTracker.hpp"
 
-#include "VolumeTrackingModifier.hpp"
 #include "CellIdWriter.hpp"
 #include "CellAgesWriter.hpp"
 #include "CellVolumesWriter.hpp"
 #include "CellProliferativeTypesCountWriter.hpp"
 #include "CellPolarityWriter.hpp"
-#include "CellLumenForceWriter.hpp"
 #include "CellContactInhibitionStatusWriter.hpp"
 #include "CellMutationStatesWriter.hpp"
 #include "TangentialCentreBasedDivisionRule.hpp"
@@ -61,6 +49,10 @@
 #include "CryptBuddingSummaryModifier.hpp"
 #include "CryptBuddingUtils.hpp"
 #include "SimProfiler.hpp"
+
+#include "CellSetupHelpers.hpp"
+#include "ECMWiringHelpers.hpp"
+#include "SimulationHelpers.hpp"
 
 void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
 {
@@ -92,83 +84,13 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
 
     for (unsigned i = 0; i < mesh.GetNumNodes(); i++)
     {
-        // Create cell cycle model - generational or simple based on config
-        AbstractCellCycleModel* p_cycle_base;
-        if (p.enableStochasticFourType)
-        {
-            auto* p_cycle = new StochasticFourTypeCellCycleModel();
-            p_cycle->SetDimension(2);
-            p_cycle->SetQuiescentVolumeFraction(p.quiescentFraction);
-            p_cycle->SetEquilibriumVolume(1.0);
-            p_cycle->SetTotalCycleMin(p.stemCycleMin);
-            p_cycle->SetTotalCycleMax(p.stemCycleMax);
-            p_cycle->SetTransitCycleRatio(p.taCycleRatio);
-            p_cycle->SetProbStemToStem(p.probStemToStem);
-            p_cycle->SetProbStemToPaneth(p.probStemToPaneth);
-            p_cycle->SetProbTaToTaEarly(p.probTaToTaEarly);
-            p_cycle->SetProbTaToTaLate(p.probTaToTaLate);
-            p_cycle->SetTransitionTime(p.transitionTime);
-            p_cycle_base = p_cycle;
-        }
-        else if (p.enableGenerationalCascade)
-        {
-            auto* p_cycle = new UniformContactInhibitionGenerationalCellCycleModel();
-            p_cycle->SetDimension(2);
-            p_cycle->SetQuiescentVolumeFraction(p.quiescentFraction);
-            p_cycle->SetEquilibriumVolume(1.0);
-            p_cycle->SetTotalCycleMin(p.stemCycleMin);
-            p_cycle->SetTotalCycleMax(p.stemCycleMax);
-            p_cycle->SetTransitCycleRatio(p.taCycleRatio);
-            p_cycle->SetMaxTransitGenerations(p.maxTransitGenerations);
-            p_cycle_base = p_cycle;
-        }
-        else
-        {
-            auto* p_cycle = new UniformContactInhibitionCellCycleModel();
-            p_cycle->SetDimension(2);
-            p_cycle->SetQuiescentVolumeFraction(p.quiescentFraction);
-            p_cycle->SetEquilibriumVolume(1.0);
-            p_cycle->SetTotalCycleMin(p.stemCycleMin);
-            p_cycle->SetTotalCycleMax(p.stemCycleMax);
-            p_cycle->SetTransitCycleRatio(p.taCycleRatio);
-            p_cycle_base = p_cycle;
-        }
+        AbstractCellCycleModel* p_cycle_base = CreateCellCycleModel(p, 2, 1.0);
 
         CellPtr p_cell(new Cell(p_state, p_cycle_base));
 
         if (p.enableStochasticFourType)
         {
-            // 4-type model: assign SC, TA, or PC by fraction using MutationState
-            // All proliferating cells are TransitCellProliferativeType;
-            // PC/EC are DifferentiatedCellProliferativeType.
-            double u_type = p_gen->ranf();
-            if (u_type < p.stemFraction)
-            {
-                // Stem cell: WildTypeCellMutationState + TransitCellProliferativeType
-                p_cell->SetCellProliferativeType(p_ta);  // TransitCellProliferativeType
-                p_cell->SetMutationState(p_state);       // WildType = Stem
-                p_cell->GetCellData()->SetItem("cell_type_id", 0.0);
-            }
-            else if (u_type < p.stemFraction + p.transitFraction)
-            {
-                // TA cell: TACellMutationState + TransitCellProliferativeType
-                p_cell->SetCellProliferativeType(p_ta);
-                p_cell->SetMutationState(p_ta_mut);
-                p_cell->GetCellData()->SetItem("cell_type_id", 1.0);
-            }
-            else if (u_type < p.stemFraction + p.transitFraction + p.panethFraction)
-            {
-                // Paneth cell: PanethCellMutationState + DifferentiatedCellProliferativeType
-                p_cell->SetCellProliferativeType(p_diff);
-                p_cell->SetMutationState(p_paneth_mut);
-                p_cell->GetCellData()->SetItem("cell_type_id", 2.0);
-            }
-            else
-            {
-                // Remaining: differentiated (general), won't divide
-                p_cell->SetCellProliferativeType(p_diff);
-                p_cell->GetCellData()->SetItem("cell_type_id", 2.0);
-            }
+            AssignStochasticFourType(p_cell, p, p_state, p_ta_mut, p_paneth_mut, p_ta, p_diff);
         }
         else
         {
@@ -176,17 +98,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
                                      p.stemFraction, p.transitFraction);
         }
 
-        // For generational model, set initial generation based on cell type
-        if (p.enableGenerationalCascade && !p.enableStochasticFourType)
-        {
-            auto* p_gen_cycle = static_cast<UniformContactInhibitionGenerationalCellCycleModel*>(p_cycle_base);
-            if (p_cell->GetCellProliferativeType()->IsType<StemCellProliferativeType>())
-                p_gen_cycle->SetGeneration(0);
-            else if (p_cell->GetCellProliferativeType()->IsType<TransitCellProliferativeType>())
-                p_gen_cycle->SetGeneration(1);  // TA cells start at generation 1
-            else
-                p_gen_cycle->SetGeneration(p.maxTransitGenerations + 1);  // Already differentiated
-        }
+        SetInitialGeneration(p_cell, p_cycle_base, p);
 
         p_cell->SetBirthTime(-p_gen->ranf() * p.stemCycleMax);
         p_cell->InitialiseCellCycleModel();
@@ -231,6 +143,11 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
     p_ring_tracker->SetCenter(center2d);
     simulator.AddSimulationModifier(p_ring_tracker);
 
+    // Wire the division rule to the tracker so it can record exact parent indices
+    // at division time, preventing spurious long-range spring connections.
+    static_cast<TangentialCentreBasedDivisionRule<2,2>*>(p_div_rule.get())
+        ->SetRingTopologyTracker(p_ring_tracker.get());
+
     if (p.enableDifferentialAdhesion)
     {
         MAKE_PTR(DifferentialAdhesionForce<2>, p_spring);
@@ -241,6 +158,12 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
         p_spring->SetApicalApicalAdhesion(p.apicalApicalAdhesion);
         p_spring->SetBasalBasalAdhesion(p.basalBasalAdhesion);
         p_spring->SetApicalBasalAdhesion(p.apicalBasalAdhesion);
+        if (p.useTopologyBasedSprings)
+        {
+            p_spring->SetRingTopologyTracker(p_ring_tracker.get());
+        }
+        p_spring->SetTAStiffnessScale(p.springStiffnessTAScale);
+        p_spring->SetDiffStiffnessScale(p.springStiffnessDiffScale);
         simulator.AddForce(p_spring);
     }
     else if (p.useTopologyBasedSprings)
@@ -289,14 +212,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
             boost::shared_ptr<ViscoelasticGhostNodeEcmField<2>> p_ve_field(
                 new ViscoelasticGhostNodeEcmField<2>("radial", gn_spacing, -ecm_half, ecm_half, -ecm_half, ecm_half,
                                       p.ecmGridType));
-            p_ve_field->SetRelaxedStiffness(p.ghostRelaxedStiffness);
-            p_ve_field->SetRelaxationModulus(p.ghostRelaxationModulus);
-            p_ve_field->SetRelaxationTime(p.ghostRelaxationTime);
-            p_ve_field->SetGhostDamping(p.ghostDamping);
-            p_ve_field->SetDegradationRate(p.ecmDegradationRate);
-            p_ve_field->SetRemovalThreshold(p.ghostRemovalThreshold);
-            p_ve_field->SetFibreRemodelingRate(p.ghostFibreRemodelingRate);
-            p_ve_field->SetAnisotropyStrength(p.ghostAnisotropyStrength);
+            ConfigureViscoelasticField(p_ve_field, p);
 
             double ecm_clear_radius = p.organoidRadius2d + 0.5 * gn_spacing;
             p_ve_field->ClearDensityInsideRadius(center2d, ecm_clear_radius);
@@ -304,14 +220,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
             if (p.enableEcmConfinement)
             {
                 MAKE_PTR(ViscoelasticGhostNodeEcmForce<2>, p_ve_force);
-                p_ve_force->SetGhostField(p_ve_field);
-                p_ve_force->SetCellGhostStiffness(p.ghostCellGhostStiffness);
-                p_ve_force->SetCellGhostRestLength(p.ghostCellGhostRestLength);
-                p_ve_force->SetCellGhostCutoff(p.ghostCellGhostCutoff);
-                p_ve_force->SetDegradationEnabled(true);
-                p_ve_force->SetRemodelingEnabled(p.enableEcmGuidance);
-                p_ve_force->SetTrackCenter(true);
-                p_ve_force->SetRemovalCheckInterval(p.ghostRemovalCheckInterval);
+                ConfigureViscoelasticForce(p_ve_force, p_ve_field, p);
                 simulator.AddForce(p_ve_force);
             }
 
@@ -325,13 +234,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
             boost::shared_ptr<GhostNodeEcmField<2>> p_ghost_field(
                 new GhostNodeEcmField<2>("radial", gn_spacing, -ecm_half, ecm_half, -ecm_half, ecm_half,
                                       p.ecmGridType));
-            p_ghost_field->SetGhostGhostStiffness(p.ghostGhostStiffness);
-            p_ghost_field->SetGhostDamping(p.ghostDamping);
-            p_ghost_field->SetDegradationRate(p.ecmDegradationRate);
-            p_ghost_field->SetRemovalThreshold(p.ghostRemovalThreshold);
-            p_ghost_field->SetFibreRemodelingRate(p.ghostFibreRemodelingRate);
-            p_ghost_field->SetAnisotropyStrength(p.ghostAnisotropyStrength);
-            p_ghost_field->SetGhostRestLength(gn_rest);
+            ConfigureGhostField(p_ghost_field, p, gn_rest);
 
             double ecm_clear_radius = p.organoidRadius2d + 0.5 * gn_spacing;
             p_ghost_field->ClearDensityInsideRadius(center2d, ecm_clear_radius);
@@ -339,14 +242,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
             if (p.enableEcmConfinement)
             {
                 MAKE_PTR(GhostNodeEcmForce<2>, p_gn_force);
-                p_gn_force->SetGhostField(p_ghost_field);
-                p_gn_force->SetCellGhostStiffness(p.ghostCellGhostStiffness);
-                p_gn_force->SetCellGhostRestLength(p.ghostCellGhostRestLength);
-                p_gn_force->SetCellGhostCutoff(p.ghostCellGhostCutoff);
-                p_gn_force->SetDegradationEnabled(true);
-                p_gn_force->SetRemodelingEnabled(p.enableEcmGuidance);
-                p_gn_force->SetTrackCenter(true);
-                p_gn_force->SetRemovalCheckInterval(p.ghostRemovalCheckInterval);
+                ConfigureGhostForce(p_gn_force, p_ghost_field, p);
                 simulator.AddForce(p_gn_force);
             }
 
@@ -371,13 +267,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
         if (p.enableEcmConfinement)
         {
             MAKE_PTR(ECMConfinementForce<2>, p_ecm);
-            p_ecm->SetECMField(p_ecm_field);
-            p_ecm->SetConfinementStiffness(p.ecmConfinementStiffness);
-            p_ecm->SetEcmSpringRestLength(p.ecmSpringRestLength);
-            p_ecm->SetEcmInteractionCutoff(p.ecmInteractionCutoff);
-            p_ecm->SetDegradationEnabled(true);
-            p_ecm->SetRemodelingEnabled(p.enableEcmGuidance);
-            p_ecm->SetTrackCenter(true);
+            ConfigureGridECMForce(p_ecm, p_ecm_field, p);
             simulator.AddForce(p_ecm);
         }
 
@@ -392,22 +282,9 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
         new RingOutlineWriter<2>(p_ring_tracker.get(), p.samplingMultiple));
     simulator.AddSimulationModifier(p_outline_writer);
 
-    if (p.enableLumenPressure)
-    {
-        MAKE_PTR(LumenPressureForce<2>, p_lumen);
-        p_lumen->SetPressure(p.lumenPressure);
-        p_lumen->SetTrackCenter(true);
-        p_lumen->SetWriteForce(true);
-        simulator.AddForce(p_lumen);
-        population.AddCellWriter<CellLumenForceWriter>();
-    }
+    WireLumenPressure<2>(simulator, population, p);
 
-    if (p.enableApicalConstriction)
-    {
-        MAKE_PTR(ApicalConstrictionForce<2>, p_ac);
-        p_ac->SetConstrictionStrength(p.apicalConstrictionStrength);
-        simulator.AddForce(p_ac);
-    }
+    WireApicalConstriction<2>(simulator, p);
 
     // Ring smoothing force — discrete Laplacian that pulls each cell toward
     // the midpoint of its two ring neighbors. Smooths kinks without pushing
@@ -421,16 +298,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
         simulator.AddForce(p_smooth);
     }
 
-    // Cell polarity force for monolayer maintenance (ya||a-style)
-    if (p.enableCellPolarity)
-    {
-        MAKE_PTR(CellPolarityForce<2>, p_polarity);
-        p_polarity->SetBendingStrength(p.polarityBendingStrength);
-        p_polarity->SetPolarityAlignmentStrength(p.polarityAlignmentStrength);
-        p_polarity->SetInteractionCutoff(p.interactionCutoff2d);
-        p_polarity->SetInitializeRadially(true);
-        simulator.AddForce(p_polarity);
-    }
+    WireCellPolarity<2>(simulator, p, p.interactionCutoff2d);
 
     if (p.enableSloughing)
     {
@@ -438,65 +306,19 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
                                 p.organoidRadius2d * p.sloughRadiusFactor);
     }
 
-    MAKE_PTR(VolumeTrackingModifier<2>, p_vol);
-    simulator.AddSimulationModifier(p_vol);
-
     double totalSimTime = p.enableRelaxation ? (p.relaxationTime + p.endTime) : p.endTime;
-    boost::shared_ptr<CryptBuddingSummaryModifier<2>> p_summary(
-        new CryptBuddingSummaryModifier<2>(p.ecmConfinementStiffness, p.samplingMultiple,
-                                           totalSimTime));
-    simulator.AddSimulationModifier(p_summary);
-
-    // Continuous PVD shadow copies (keeps .pvd files valid for ParaView during simulation)
-    if (p.enableContinuousPvd)
-    {
-        boost::shared_ptr<ContinuousPvdModifier<2>> p_pvd(
-            new ContinuousPvdModifier<2>(p.samplingMultiple));
-        simulator.AddSimulationModifier(p_pvd);
-    }
+    WireCommonModifiers<2>(simulator, p, totalSimTime);
 
     if (p.enableRelaxation)
     {
-        std::map<CellPtr, boost::shared_ptr<AbstractCellProperty>> origTypes;
-        for (AbstractCellPopulation<2>::Iterator it = population.Begin();
-             it != population.End(); ++it)
-        {
-            origTypes[*it] = it->GetCellProliferativeType();
-            it->SetCellProliferativeType(p_diff);
-        }
-
-        simulator.SetEndTime(p.relaxationTime);
-        std::cout << "--- Phase 1: Relaxation (" << p.relaxationTime << "h) ---" << std::endl;
-        simulator.Solve();
-
-        for (AbstractCellPopulation<2>::Iterator it = population.Begin();
-             it != population.End(); ++it)
-        {
-            if (origTypes.count(*it)) it->SetCellProliferativeType(origTypes[*it]);
-        }
-
-        simulator.SetEndTime(p.relaxationTime + p.endTime);
-        std::cout << "--- Phase 2: Growth (" << p.endTime << "h) ---" << std::endl;
-        simulator.Solve();
+        RunRelaxationPhase<2>(simulator, population, p);
     }
     else
     {
         simulator.Solve();
     }
 
-    unsigned final_cells = population.GetNumRealCells();
-    std::cout << "\nSIMULATION COMPLETE  |  Final cells: " << final_cells << std::endl;
-
-    // Print profiling summary
-    SimProfiler::Instance().PrintSummary();
-
-    // Also save CSV for further analysis
-    OutputFileHandler prof_handler(outputDir, false);
-    std::string profCsvPath = prof_handler.GetOutputDirectoryFullPath() + "profiler.csv";
-    SimProfiler::Instance().WriteSummaryCSV(profCsvPath);
-
-    if (final_cells == 0)
-        EXCEPTION("Simulation ended with zero cells");
+    PrintSimulationSummary<2>(population, outputDir);
 }
 
 #endif // RUNNODE2D_HPP_

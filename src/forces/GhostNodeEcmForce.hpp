@@ -63,6 +63,9 @@ private:
     /** Tissue centroid (for radial traction direction) */
     c_vector<double, DIM> mCenter;
 
+    /** Whether to dynamically expand ghost node domain when cells approach boundary */
+    bool mBoundaryExpansionEnabled;
+
     /** Counter for periodic ghost node removal checks */
     unsigned mRemovalCheckInterval;
     unsigned mStepCounter;
@@ -93,6 +96,7 @@ public:
           mDegradationEnabled(true),
           mRemodelingEnabled(true),
           mTrackCenter(true),
+          mBoundaryExpansionEnabled(false),
           mRemovalCheckInterval(100),
           mStepCounter(0),
           mLastStepProcessed(UINT_MAX)
@@ -307,6 +311,19 @@ public:
                               << " depleted nodes (" << mpGhostField->GetNumActive()
                               << " remaining)" << std::endl;
                 }
+
+                // ── Dynamic boundary expansion ──────────────────
+                if (mBoundaryExpansionEnabled)
+                {
+                    std::vector<c_vector<double, DIM>> cell_positions;
+                    for (typename AbstractCellPopulation<DIM>::Iterator ci = rCellPopulation.Begin();
+                         ci != rCellPopulation.End(); ++ci)
+                    {
+                        cell_positions.push_back(rCellPopulation.GetLocationOfCellCentre(*ci));
+                    }
+                    double expansion_threshold = mpGhostField->GetInitialSpacing() * 2.0;
+                    mpGhostField->ExpandBoundary(cell_positions, expansion_threshold);
+                }
             }
         }
     }
@@ -332,6 +349,7 @@ public:
     void SetDegradationEnabled(bool enabled) { mDegradationEnabled = enabled; }
     void SetRemodelingEnabled(bool enabled) { mRemodelingEnabled = enabled; }
     void SetTrackCenter(bool track) { mTrackCenter = track; }
+    void SetBoundaryExpansionEnabled(bool enabled) { mBoundaryExpansionEnabled = enabled; }
     void SetRemovalCheckInterval(unsigned interval) { mRemovalCheckInterval = interval; }
 
     void SetCenter(c_vector<double, DIM> center)
