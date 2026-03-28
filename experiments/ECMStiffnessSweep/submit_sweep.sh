@@ -225,9 +225,9 @@ fi
 # #############################################################################
 
 # ---------- Stiffness sweep parameters ----------
-STIFFNESS_VALUES=(0.5 1.0 2.0 5.0 10.0 20.0 50.0)
+STIFFNESS_VALUES=(0.5 1.0 2.0 5.0 10.0 20.0 35.0 50.0 70.0 100.0)
 NUM_STIFFNESS=${#STIFFNESS_VALUES[@]}
-NUM_REPLICATES=10
+NUM_REPLICATES=1
 
 # Decode array task ID → (stiffness_index, replicate)
 STIFFNESS_INDEX=$((SLURM_ARRAY_TASK_ID / NUM_REPLICATES))
