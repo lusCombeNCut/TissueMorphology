@@ -10,6 +10,9 @@
 #
 # Supports four model types: node2d, vertex2d, node3d, vertex3d
 #
+# Phase 3 (analyse): Single job — merge output, run analysis scripts,
+#                    generate plots. Starts after all sims finish.
+#
 # Usage (always run directly, never with sbatch):
 #   ./submit_sweep.sh node2d
 #   ./submit_sweep.sh vertex2d
@@ -22,6 +25,10 @@
 # Prerequisites:
 #   1. Container image at /user/work/$(whoami)/containers/tissuemorphology.sif
 #   2. Source code at /user/work/$(whoami)/TissueMorphology (or auto-cloned)
+#
+# To download results locally after jobs complete:
+#   scp -r sv22482@bp1-login.acrc.bris.ac.uk:/user/work/sv22482/sim_output/analysis_<TIMESTAMP>/plots/ ./plots/
+#   (The exact command with timestamp is printed when you run this script)
 # =============================================================================
 
 # ---------- SBATCH defaults (used by simulation array; overridden for build) --
@@ -89,6 +96,8 @@ if [ -z "${SLURM_JOB_ID}" ]; then
     echo "  Build job:  ${BUILD_JOB_ID} (shared by all models)"
 
     # Phase 2: Submit simulation array for each model (all depend on single build)
+    SIM_JOB_IDS=()
+    RUN_TAGS_CSV=""
     for model in "${MODELS_TO_RUN[@]}"; do
         SIM_JOB_ID=$(sbatch --parsable \
             --job-name="Sim_${model}" \
@@ -96,11 +105,35 @@ if [ -z "${SLURM_JOB_ID}" ]; then
             --export=ALL,SWEEP_PHASE=run,SWEEP_TIMESTAMP=${SWEEP_TIMESTAMP} \
             "$0" "${model}")
 
+        SIM_JOB_IDS+=("$SIM_JOB_ID")
+        RUN_TAGS_CSV="${RUN_TAGS_CSV:+${RUN_TAGS_CSV},}${SIM_JOB_ID}_${model}_${SWEEP_TIMESTAMP}"
+
         echo "  ${model} sim:   ${SIM_JOB_ID}  (depends on build ${BUILD_JOB_ID})"
-        echo "    Logs:   ${BASE_LOG_DIR}/${SIM_JOB_ID}_${model}_${SWEEP_TIMESTAMP}/"
         echo "    Output: /user/work/$(whoami)/sim_output/${SIM_JOB_ID}_${model}_${SWEEP_TIMESTAMP}/"
     done
 
+    # Phase 3: Analysis job (runs after all simulations finish)
+    DEP_STR=$(IFS=:; echo "${SIM_JOB_IDS[*]}")
+    ANALYSIS_OUTPUT="/user/work/$(whoami)/sim_output/analysis_ecm_stiffness_${SWEEP_TIMESTAMP}"
+
+    ANALYSE_JOB_ID=$(sbatch --parsable \
+        --job-name="Analyse_ECMStiffness" \
+        --dependency=afterany:${DEP_STR} \
+        --array=0 \
+        --cpus-per-task=2 \
+        --mem-per-cpu=8G \
+        --time=02:00:00 \
+        --export=ALL,SWEEP_PHASE=analyse,SWEEP_TIMESTAMP=${SWEEP_TIMESTAMP},ANALYSIS_RUN_TAGS=${RUN_TAGS_CSV},ANALYSIS_OUTPUT=${ANALYSIS_OUTPUT} \
+        --output="${BASE_LOG_DIR}/analyse_%j.out" \
+        --error="${BASE_LOG_DIR}/analyse_%j.err" \
+        "$0" "node2d")
+
+    echo ""
+    echo "  Analysis:  ${ANALYSE_JOB_ID}  (depends on all sims: ${DEP_STR})"
+    echo "    Results: ${ANALYSIS_OUTPUT}/plots/"
+    echo ""
+    echo "  To download plots locally after completion:"
+    echo "    scp -r $(whoami)@bp1-login.acrc.bris.ac.uk:${ANALYSIS_OUTPUT}/plots/ ./plots/"
     echo ""
     exit 0
 fi
@@ -217,6 +250,96 @@ if [ "${SWEEP_PHASE}" = "build" ]; then
     echo "  Build Successful"
     echo "  Binary: ${HOST_APP_PATH}"
     echo "  End Time: $(date)"
+    echo "============================================"
+    exit 0
+fi
+
+# #############################################################################
+# PHASE: ANALYSE  (single job — merge output, run analysis, generate plots)
+# #############################################################################
+if [ "${SWEEP_PHASE}" = "analyse" ]; then
+
+    ANALYSIS_OUTPUT="${ANALYSIS_OUTPUT:-/user/work/$(whoami)/sim_output/analysis_ecm_stiffness_${SWEEP_TIMESTAMP}}"
+    MERGED_DIR="${ANALYSIS_OUTPUT}/merged"
+    PLOTS_OUT="${ANALYSIS_OUTPUT}/plots"
+    ANALYSIS_OUT="${ANALYSIS_OUTPUT}/crypt_analysis_output"
+    TIMESTEP_OUT="${ANALYSIS_OUTPUT}/timestep_analysis_output"
+
+    mkdir -p "${PLOTS_OUT}" "${ANALYSIS_OUT}" "${TIMESTEP_OUT}"
+
+    LOG_FILE="${ANALYSIS_OUTPUT}/analysis.log"
+    exec > >(tee -a "${LOG_FILE}")
+    exec 2>&1
+
+    echo "============================================"
+    echo "  ECM Stiffness Sweep — Analysis Phase"
+    echo "  Start Time:   $(date)"
+    echo "============================================"
+
+    # Parse RUN_TAGS
+    IFS=',' read -ra RUN_TAGS <<< "${ANALYSIS_RUN_TAGS}"
+    SIM_OUTPUT_BASE="/user/work/$(whoami)/sim_output"
+
+    echo "  Run tags: ${RUN_TAGS[*]}"
+
+    # Create merged directory with CryptBudding/<model>/stiffness_*/run_* symlinks
+    rm -rf "${MERGED_DIR}"
+    for model in node2d vertex2d node3d vertex3d; do
+        MERGED_MODEL="${MERGED_DIR}/CryptBudding/${model}"
+        for tag in "${RUN_TAGS[@]}"; do
+            SEARCH_DIR="${SIM_OUTPUT_BASE}/${tag}"
+            [ -d "${SEARCH_DIR}" ] || continue
+            for sdir in "${SEARCH_DIR}"/s*_r*/CryptBudding/*/"${model}"/stiffness_*; do
+                [ -d "${sdir}" ] || continue
+                stiff=$(basename "${sdir}")
+                mkdir -p "${MERGED_MODEL}/${stiff}"
+                for rdir in "${sdir}"/run_*; do
+                    [ -d "${rdir}" ] || continue
+                    run=$(basename "${rdir}")
+                    [ ! -e "${MERGED_MODEL}/${stiff}/${run}" ] && \
+                        ln -s "${rdir}" "${MERGED_MODEL}/${stiff}/${run}"
+                done
+            done
+        done
+    done
+
+    echo "  Merged directory: ${MERGED_DIR}"
+
+    # Load Python
+    module load languages/python 2>/dev/null || module load python 2>/dev/null || true
+
+    SCRIPT_DIR="${SOURCE_DIR}/experiments/ECMStiffnessSweep"
+
+    echo ""
+    echo "  Running crypt count analysis..."
+    python3 "${SCRIPT_DIR}/analyse_crypt_budding.py" \
+        --base-dir "${MERGED_DIR}" \
+        -o "${ANALYSIS_OUT}" \
+        --method fourier \
+        --use-outline \
+        --debug-plots \
+        2>&1 | tee "${ANALYSIS_OUT}/crypt_analysis.log" || true
+
+    echo ""
+    echo "  Running timestep summary..."
+    python3 "${SCRIPT_DIR}/timestep_summary.py" \
+        --base-dir "${MERGED_DIR}" \
+        -o "${TIMESTEP_OUT}" \
+        2>&1 | tee "${TIMESTEP_OUT}/timestep_analysis.log" || true
+
+    echo ""
+    echo "  Running summary plot generation..."
+    python3 "${SCRIPT_DIR}/analyse_and_plot.py" \
+        --data-dir "${MERGED_DIR}" \
+        -o "${PLOTS_OUT}" \
+        2>&1 | tee "${PLOTS_OUT}/plot_generation.log" || true
+
+    echo ""
+    echo "============================================"
+    echo "  Analysis Complete — $(date)"
+    echo "  Plots:           ${PLOTS_OUT}/"
+    echo "  Crypt counts:    ${ANALYSIS_OUT}/"
+    echo "  Timestep summary:${TIMESTEP_OUT}/"
     echo "============================================"
     exit 0
 fi
