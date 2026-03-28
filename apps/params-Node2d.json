@@ -1,0 +1,120 @@
+{
+  "unitConversion": {
+    "usePhysicalUnits": false,
+    "cellDiameterMicrometers": 10.0,
+    "referenceForcenN": 10.0,
+    "referenceVelocityUmPerH": 10.0,
+    "_comment": "Set usePhysicalUnits to true to define parameters in physical units (N/m, Pa, N·m)."
+  },
+
+  "simulation": {
+    "modelType": "node2d",
+    "endTime": 168.0,
+    "dt": 0.005,
+    "relaxationTime": 10.0,
+    "runNumber": 0
+  },
+
+  "features": {
+    "enableRelaxation": false,
+    "enableLumenPressure": true,
+    "enableApicalConstriction": true,
+    "enableCurvatureBending": true,
+    "enableCellPolarity": false,
+    "enableDifferentialAdhesion": true,
+    "enableEcmConfinement": true,
+    "enableGhostNodeECM": true,
+    "enableViscoelasticECM": true,
+    "enableEcmGuidance": false,
+    "enableSloughing": false,
+    "enableLumenHole": true,
+    "useTopologyBasedSprings": false,
+    "enableContinuousPvd": false
+  },
+
+  "geometry": {
+    "numCells2dNode": 18,
+    "organoidRadius2d": 2.865,
+    "innerRadius2d": 2.365,
+    "outerRadius2d": 3.365,
+    "interactionCutoff2d": 2.5
+  },
+
+  "forces": {
+    "SpringForce": {
+      "springStiffness": 15.0,
+      "springCutoff": 1.5,
+      "springStiffnessTAScale": 1.0,
+      "springStiffnessDiffScale": 1.0
+    },
+
+    "LumenPressureForce": {
+      "lumenPressure": 2.0,
+      "lumenBulkModulus": 10.0
+    },
+
+    "RingSmoothingForce": {
+      "bendingStiffness": 5.0,
+      "gammaStemScale": 0.7,
+      "gammaTransitScale": 1.0,
+      "gammaDiffScale": 1.3
+    },
+
+    "ApicalConstrictionForce": {
+      "apicalConstrictionStrength": 3.0
+    },
+
+    "ECMConfinementForce": {
+      "ecmStiffness": 5.0,
+      "ecmSpringRestLength": 0.0,
+      "ecmInteractionCutoff": 1.5,
+      "bmRadiusFraction": 1.25,
+      "ecmMaxRadiusFraction": 30.0,
+      "ecmGridSpacing": 1.0,
+      "ecmGridType": "hex",
+      "ecmDegradationRate": 0.02,
+      "ecmDiffusionCoeff": 0.1
+    },
+
+    "GhostNodeECM": {
+      "ghostDamping": 5.0,
+      "ghostRemovalThreshold": 0.05,
+      "ghostFibreRemodelingRate": 0.1,
+      "ghostAnisotropyStrength": 0.5,
+      "ghostCellGhostRestLength": 0.0,
+      "ghostCellGhostCutoff": 1.5,
+      "ghostSpringRestLength": -1.0,
+      "ghostGridSpacing": -1.0,
+      "ghostRemovalCheckInterval": 100,
+      "ViscoelasticECM": {
+        "ghostRelaxedStiffness": 5.0,
+        "ghostRelaxationModulus": 1.0,
+        "_comment_E1": "E1/E0 = 0.20; upper bound of Fertala et al. (2025) microgel AFM (range 0.05–0.20). Source default was 2.0 (ratio 0.40), exceeding measured range.",
+        "ghostRelaxationTime": 1.0
+      }
+    }
+  },
+
+  "cellTypes": {
+    "stemFraction": 0.2,
+    "transitFraction": 0.5
+  },
+
+  "cellCycle": {
+    "quiescentFraction": 0.7,
+    "sloughRadiusFactor": 5.0,
+    "stemCycleMin": 12.0,
+    "stemCycleMax": 14.0,
+    "taCycleRatio": 0.5,
+    "StochasticFourTypeModel": {
+      "enableStochasticFourType": true,
+      "enableGenerationalCascade": false,
+      "probStemToStem": 0.89,
+      "probStemToPaneth": 0.09,
+      "probTaToTaEarly": 0.9,
+      "probTaToTaLate": 0.7,
+      "transitionTime": 120.0,
+      "panethFraction": 0.09
+    }
+  }
+}

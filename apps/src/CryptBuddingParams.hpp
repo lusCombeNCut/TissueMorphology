@@ -261,10 +261,11 @@ struct CryptBuddingParams
 
         if (usePhysicalUnits)
         {
-            // If elastic modulus is specified, derive ecmStiffness:
-            //   k [N/m] = E [Pa] × L0 [m]  →  k_sim = (E × L0) / kF
+            // If elastic modulus is specified, derive ecmStiffness in physical N/m first:
+            //   k_phys [N/m] = E [Pa] × L0 [m]
+            // Then the common /kF below converts it to sim units.
             if (ecmElasticModulusPa > 0.0)
-                ecmStiffness = (ecmElasticModulusPa * L0) / kF;
+                ecmStiffness = ecmElasticModulusPa * L0;
 
             // Convert physical → sim (divide by factor)
             ecmStiffness             /= kF;
@@ -276,7 +277,9 @@ struct CryptBuddingParams
             gammaBasal               /= kF;
             gammaLateral             /= kF;
             lumenPressure            /= pF;
-            apicalConstrictionStrength /= pF;
+            // apicalConstrictionStrength is NOT converted: it is a geometric
+            // stiffness coefficient (F = k * area_difference) where area is in
+            // [CD²], so the units are η/(CD·h) — not pressure.
             polarityBendingStrength  /= pF;
             nhMembraneSurface        /= kF;
             nhCellCellAdhesion       /= kF;
@@ -353,7 +356,7 @@ struct CryptBuddingParams
         row("gammaBasal",                gammaBasal,                "N/m",  gammaBasal * kF);
         row("gammaLateral",              gammaLateral,              "N/m",  gammaLateral * kF);
         row("lumenPressure",             lumenPressure,             "Pa",   lumenPressure * pF);
-        row("apicalConstrictionStrength",apicalConstrictionStrength,"Pa",   apicalConstrictionStrength * pF);
+        row("apicalConstrictionStrength",apicalConstrictionStrength,"(sim)", apicalConstrictionStrength); // geometric coeff, not converted
         row("polarityBendingStrength",   polarityBendingStrength,   "Pa",   polarityBendingStrength * pF);
         row("nhMembraneSurface",         nhMembraneSurface,         "N/m",  nhMembraneSurface * kF);
         row("nhCellCellAdhesion",        nhCellCellAdhesion,        "N/m",  nhCellCellAdhesion * kF);
@@ -371,6 +374,20 @@ struct CryptBuddingParams
         std::cout << "  " << std::string(76, '-') << "\n\n";
     }
 
+    /**
+     * Initialise internal/sentinel fields only.
+     *
+     * IMPORTANT: Physics parameter defaults (spring stiffness, adhesion values,
+     * surface tensions, ECM parameters, etc.) are defined in
+     * apps/config/default_params.json — NOT here. ParseArguments() auto-loads
+     * that file before applying any user config. The physics values below are
+     * fallbacks only, used when default_params.json cannot be found (e.g. in
+     * unit tests that construct CryptBuddingParams directly).
+     *
+     * Sentinel values (negative = "auto-derive in Finalise()") must remain here
+     * because the JSON parser skips keys with value -1.0 that it cannot
+     * distinguish from valid user intent.
+     */
     void SetDefaults()
     {
         modelType = "";

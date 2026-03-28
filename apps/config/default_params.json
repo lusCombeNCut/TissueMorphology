@@ -1,0 +1,172 @@
+{
+  "_comment": "Default parameters mirroring CryptBuddingParams::SetDefaults(). Copy and modify for experiments. Keys with '_comment' prefix are ignored by the parser. Last synced: 2026-03-28",
+
+  "unitConversion": {
+    "usePhysicalUnits": false,
+    "cellDiameterMicrometers": 10.0,
+    "referenceForcenN": 10.0,
+    "referenceVelocityUmPerH": 10.0,
+    "_comment": "usePhysicalUnits=true converts kPa/Pa·s params to sim units. η = referenceForcenN*1e-9 / (referenceVelocityUmPerH*1e-6/3600)"
+  },
+
+  "simulation": {
+    "_comment": "modelType set via -model flag. endTime/dt auto-tuned per model if omitted.",
+    "endTime": 168.0,
+    "dt": 0.005,
+    "dtGrow": 0.002,
+    "relaxationTime": 10.0,
+    "runNumber": 0
+  },
+
+  "features": {
+    "enableLumenPressure": true,
+    "enableApicalConstriction": true,
+    "enableEcmGuidance": false,
+    "enableRelaxation": true,
+    "enableSloughing": true,
+    "enableDifferentialAdhesion": true,
+    "enableNonNeighbourCellRepulsion": true,
+    "enableCurvatureBending": true,
+    "enableCellPolarity": true,
+    "enableEcmConfinement": true,
+    "enableLumenHole": true,
+    "enableContinuousPvd": false,
+    "useTopologyBasedSprings": true
+  },
+
+  "geometry": {
+    "_comment2d": "2D node model: 80 cells; 2D vertex: 40 elements; inner/outer radii define annulus",
+    "organoidRadius2d": 8.0,
+    "numCells2dNode": 80,
+    "numCells2dVertex": 40,
+    "innerRadius2d": 6.0,
+    "outerRadius2d": 8.0,
+    "interactionCutoff2d": 2.5,
+    "t2Threshold2d": 0.05,
+    "_comment3d": "3D geometry",
+    "numCells3dNode": 100,
+    "numCells3dVertex": 200,
+    "organoidRadius3d": 10.0,
+    "shellThickness3d": 3.0,
+    "interactionCutoff3d": 8.0,
+    "bmOffset3dVertex": 1.0
+  },
+
+  "forces": {
+    "SpringForce": {
+      "springStiffness": 30.0,
+      "springCutoff": 1.5,
+      "springStiffnessTAScale": 1.0,
+      "springStiffnessDiffScale": 1.0
+    },
+
+    "DifferentialAdhesionForce": {
+      "apicalApicalAdhesion": 1.2,
+      "basalBasalAdhesion": 1.0,
+      "apicalBasalAdhesion": 0.5
+    },
+
+    "LumenPressureForce": {
+      "lumenPressure": 2.0,
+      "lumenUseTargetVolume": false,
+      "lumenVolumeGrowthRate": 0.05,
+      "lumenBulkModulus": 10.0
+    },
+
+    "ApicalConstrictionForce": {
+      "apicalConstrictionStrength": 3.0
+    },
+
+    "RingSmoothingForce": {
+      "bendingStiffness": 5.0,
+      "gammaStemScale": 0.7,
+      "gammaTransitScale": 1.0,
+      "gammaDiffScale": 1.3
+    },
+
+    "ECMConfinementForce": {
+      "ecmStiffness": 5.0,
+      "ecmSpringRestLength": 0.0,
+      "ecmInteractionCutoff": 1.5,
+      "bmRadiusFraction": 1.25,
+      "ecmMaxRadiusFraction": 4.0,
+      "ecmGridSpacing": 10.0,
+      "ecmGridType": "square",
+      "ecmDegradationRate": 0.02,
+      "ecmDiffusionCoeff": 0.1
+    },
+
+    "CellPolarityForce": {
+      "polarityBendingStrength": 0.3,
+      "polarityAlignmentStrength": 0.1
+    },
+
+    "NagaiHondaForce": {
+      "_comment": "Chaste defaults (×100 relative to Nagai & Honda 2001 paper). λ_d=100 hardcoded in RunVertex2d/3d.",
+      "nhMembraneSurface": 10.0,
+      "nhCellCellAdhesion": 1.0,
+      "nhBoundaryAdhesion": 2.0,
+      "nonNeighbourRepulsionStiffness": 25.0,
+      "nonNeighbourRepulsionCutoff": 1.1,
+      "_differentialAdhesion": {
+        "nhStemStemAdhesion": 1.0,
+        "nhStemTransitAdhesion": 1.0,
+        "nhStemDiffAdhesion": 1.0,
+        "nhTransitTransitAdhesion": 1.0,
+        "nhTransitDiffAdhesion": 1.0,
+        "nhDiffDiffAdhesion": 1.0,
+        "nhStemBoundaryAdhesion": 2.0,
+        "nhTransitBoundaryAdhesion": 2.0,
+        "nhDiffBoundaryAdhesion": 2.0
+      },
+      "gammaApical": 0.85,
+      "gammaBasal": 0.85,
+      "gammaLateral": 0.7,
+      "gammaStemScale": 0.7,
+      "gammaTransitScale": 1.0,
+      "gammaDiffScale": 1.3
+    },
+
+    "GhostNodeECM": {
+      "ghostDamping": 5.0,
+      "ghostRemovalThreshold": 0.05,
+      "ghostFibreRemodelingRate": 0.1,
+      "ghostAnisotropyStrength": 0.5,
+      "ghostCellGhostRestLength": 0.0,
+      "ghostCellGhostCutoff": 1.5,
+      "ghostSpringRestLength": -1.0,
+      "ghostGridSpacing": -1.0,
+      "ghostRemovalCheckInterval": 100,
+      "ViscoelasticECM": {
+        "_comment": "SLS model: E(t) = E0 + E1*exp(-t/tau). Defaults match C++ source defaults.",
+        "ghostRelaxedStiffness": 5.0,
+        "ghostRelaxationModulus": 1.0,
+        "ghostRelaxationTime": 1.0
+      }
+    }
+  },
+
+  "cellTypes": {
+    "stemFraction": 0.2,
+    "transitFraction": 0.5
+  },
+
+  "cellCycle": {
+    "quiescentFraction": 0.7,
+    "sloughRadiusFactor": 5.0,
+    "stemCycleMin": 12.0,
+    "stemCycleMax": 14.0,
+    "taCycleRatio": 0.5,
+    "StochasticFourTypeModel": {
+      "enableStochasticFourType": true,
+      "enableGenerationalCascade": false,
+      "maxTransitGenerations": 3,
+      "probStemToStem": 0.89,
+      "probStemToPaneth": 0.09,
+      "probTaToTaEarly": 0.9,
+      "probTaToTaLate": 0.7,
+      "transitionTime": 120.0,
+      "panethFraction": 0.09
+    }
+  }
+}

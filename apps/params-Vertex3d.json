@@ -1,0 +1,135 @@
+{
+  "unitConversion": {
+    "usePhysicalUnits": false,
+    "cellDiameterMicrometers": 10.0,
+    "referenceForcenN": 10.0,
+    "referenceVelocityUmPerH": 10.0,
+    "_comment": "Set usePhysicalUnits to true to define parameters in physical units (N/m, Pa, N·m)."
+  },
+
+  "simulation": {
+    "modelType": "vertex3d",
+    "endTime": 168.0,
+    "dt": 0.001,
+    "relaxationTime": 10.0,
+    "runNumber": 0
+  },
+
+  "features": {
+    "enableRelaxation": true,
+    "enableLumenPressure": true,
+    "enableApicalConstriction": true,
+    "enableDifferentialAdhesion": true,
+    "enableEcmConfinement": true,
+    "enableGhostNodeECM": true,
+    "enableViscoelasticECM": true,
+    "enableEcmGuidance": false,
+    "enableSloughing": false,
+    "enableLumenHole": true,
+    "enableContinuousPvd": false
+  },
+
+  "geometry": {
+    "numCells3dNode": 18,
+    "numCells3dVertex": 18,
+    "organoidRadius3d": 1.197,
+    "shellThickness3d": 0.0,
+    "interactionCutoff3d": 1.5,
+    "bmOffset3dVertex": 0.0
+  },
+
+  "forces": {
+    "LumenPressureForce": {
+      "lumenPressure": 1.0
+    },
+
+    "ApicalConstrictionForce": {
+      "apicalConstrictionStrength": 0.01
+    },
+
+    "ECMConfinementForce": {
+      "ecmStiffness": 5.0,
+      "bmRadiusFraction": 1.25,
+      "ecmMaxRadiusFraction": 30.0,
+      "ecmDomainHalf": 5.5,
+      "ecmGridSpacing": 1.0,
+      "ecmGridType": "hex",
+      "ecmDegradationRate": 0.05,
+      "ecmDiffusionCoeff": 0.1
+    },
+
+    "GhostNodeECM": {
+      "ghostDamping": 5.0,
+      "ghostRemovalThreshold": 0.05,
+      "ghostFibreRemodelingRate": 0.1,
+      "ghostAnisotropyStrength": 0.5,
+      "ghostCellGhostRestLength": 1.0,
+      "ghostCellGhostCutoff": 2.0,
+      "ghostSpringRestLength": 1.0,
+      "ghostRemovalCheckInterval": 10,
+      "ViscoelasticECM": {
+        "ghostRelaxedStiffness": 5.0,
+        "ghostRelaxationModulus": 1.0,
+        "_comment_E1": "Reduced from 2.0: E1/E0 = 0.20 is upper bound of Fertala et al. (2025) microgel AFM (range 0.05–0.20).",
+        "ghostRelaxationTime": 1.0
+      }
+    },
+
+    "NagaiHondaForce": {
+      "_comment_lambda_m": "nhMembraneSurface reduced from 10.0: Farhadifar (2007) soft regime with K_A=100 gives 4.0.",
+      "nhMembraneSurface": 4.0,
+      "_comment_gamma_cc": "nhCellCellAdhesion set to Farhadifar (2007) soft regime, K_A=100 (Λ=12.0).",
+      "nhCellCellAdhesion": 12.0,
+      "_comment_gamma_b": "nhBoundaryAdhesion = 1.17 × γ_cc; Fletcher (2014) free edge convention.",
+      "nhBoundaryAdhesion": 14.0,
+      "_differentialAdhesion": {
+        "_comment": "stem:diff ratio ≈ 0.25 from van Leeuwen (2009) CPM EphB expression. Previously all = 10.0 (no differentiation).",
+        "nhStemStemAdhesion": 3.0,
+        "nhStemTransitAdhesion": 6.0,
+        "nhStemDiffAdhesion": 6.0,
+        "nhTransitTransitAdhesion": 12.0,
+        "nhTransitDiffAdhesion": 12.0,
+        "nhDiffDiffAdhesion": 12.0,
+        "nhStemBoundaryAdhesion": 3.5,
+        "nhTransitBoundaryAdhesion": 14.0,
+        "nhDiffBoundaryAdhesion": 14.0
+      },
+      "_comment_gamma_surf": "gammaApical=1.0, gammaBasal=0.7 from Drozdowski & Schwarz (2024) validated baseline. Asymmetry required per Pérez-González (2021).",
+      "gammaApical": 1.0,
+      "gammaBasal": 0.7,
+      "gammaLateral": 0.7,
+      "gammaStemScale": 0.7,
+      "gammaTransitScale": 1.0,
+      "gammaDiffScale": 1.3
+    },
+
+    "DifferentialAdhesionForce": {
+      "apicalApicalAdhesion": 1.2,
+      "basalBasalAdhesion": 1.0,
+      "apicalBasalAdhesion": 0.5
+    }
+  },
+
+  "cellTypes": {
+    "stemFraction": 0.2,
+    "transitFraction": 0.5
+  },
+
+  "cellCycle": {
+    "quiescentFraction": 0.7,
+    "sloughRadiusFactor": 5.0,
+    "stemCycleMin": 12.0,
+    "stemCycleMax": 14.0,
+    "taCycleRatio": 0.5,
+    "StochasticFourTypeModel": {
+      "enableStochasticFourType": true,
+      "enableGenerationalCascade": false,
+      "probStemToStem": 0.89,
+      "probStemToPaneth": 0.09,
+      "probTaToTaEarly": 0.9,
+      "probTaToTaLate": 0.7,
+      "transitionTime": 120.0,
+      "panethFraction": 0.09
+    }
+  }
+}

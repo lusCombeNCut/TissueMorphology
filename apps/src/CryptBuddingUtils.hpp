@@ -12,8 +12,10 @@
 #define CRYPTBUDDINGUTILS_HPP_
 
 #include <cmath>
+#include <cstdlib>
 #include <string>
 #include <iostream>
+#include <fstream>
 #include <vector>
 
 #include "SmartPointers.hpp"
@@ -270,9 +272,52 @@ inline void PrintUsage()
 inline CryptBuddingParams ParseArguments(int argc, char* argv[])
 {
     CryptBuddingParams p;
-    p.SetDefaults();
+    p.SetDefaults();  // Initialises sentinels/internal flags only; physics values overridden below
 
-    // First pass: look for -config to load base parameters
+    // ── Step 1: Auto-load system defaults from default_params.json ────────────────
+    // This is the canonical source of default physics parameters (not the C++ SetDefaults()).
+    // Search order:
+    //   a) $CRYPTBUDDING_DEFAULTS environment variable
+    //   b) <dir-of -config arg>/config/default_params.json
+    {
+        // Peek at the -config argument so we can derive the defaults path from it
+        std::string configArg;
+        for (int i = 1; i + 1 < argc; ++i)
+            if (std::string(argv[i]) == "-config") { configArg = argv[i + 1]; break; }
+
+        std::string defaultsPath;
+
+        // a) Env var
+        if (const char* env = std::getenv("CRYPTBUDDING_DEFAULTS"))
+            if (env[0]) defaultsPath = env;
+
+        // b) Relative to the -config file: <config_dir>/config/default_params.json
+        if (defaultsPath.empty() && !configArg.empty())
+        {
+            size_t sep = configArg.find_last_of("/\\");
+            std::string dir = (sep != std::string::npos) ? configArg.substr(0, sep) : ".";
+            std::string candidate = dir + "/config/default_params.json";
+            if (std::ifstream(candidate).good()) defaultsPath = candidate;
+        }
+
+        if (!defaultsPath.empty())
+        {
+            p.LoadFromJson(defaultsPath);
+            // Reset override-tracking flags: the defaults JSON must not lock out
+            // Finalise() auto-tuning (e.g. dt, endTime) for the user's config.
+            p.endTimeOverridden    = false;
+            p.dtOverridden         = false;
+            p.t1ThresholdOverridden = false;
+            p.t2ThresholdOverridden = false;
+        }
+        else
+        {
+            std::cerr << "Note: default_params.json not found — using compiled-in defaults.\n"
+                      << "      Set $CRYPTBUDDING_DEFAULTS or ensure -config is in the apps/ directory.\n";
+        }
+    }
+
+    // ── Step 2: Load user config file (overrides defaults) ───────────────────────
     for (int i = 1; i < argc; i++)
     {
         std::string arg = argv[i];
