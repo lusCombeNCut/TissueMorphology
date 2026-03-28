@@ -29,10 +29,10 @@
 #SBATCH --partition=compute
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=4G
 #SBATCH --time=12:00:00
-#SBATCH --array=0-69%20
+#SBATCH --array=0-99%20
 #SBATCH --output=/user/work/%u/logs/ecm_stiffness_sweep/slurm-%A_%a.out
 #SBATCH --error=/user/work/%u/logs/ecm_stiffness_sweep/slurm-%A_%a.err
 
@@ -79,6 +79,7 @@ if [ -z "${SLURM_JOB_ID}" ]; then
     BUILD_JOB_ID=$(sbatch --parsable \
         --job-name="Build_CryptBudding" \
         --array=0 \
+        --cpus-per-task=4 \
         --time=01:00:00 \
         --export=ALL,SWEEP_PHASE=build,SWEEP_TIMESTAMP=${SWEEP_TIMESTAMP} \
         --output="${BASE_LOG_DIR}/build_%j.out" \
@@ -227,7 +228,7 @@ fi
 # ---------- Stiffness sweep parameters ----------
 STIFFNESS_VALUES=(0.5 1.0 2.0 5.0 10.0 20.0 35.0 50.0 70.0 100.0)
 NUM_STIFFNESS=${#STIFFNESS_VALUES[@]}
-NUM_REPLICATES=1
+NUM_REPLICATES=10
 
 # Decode array task ID → (stiffness_index, replicate)
 STIFFNESS_INDEX=$((SLURM_ARRAY_TASK_ID / NUM_REPLICATES))
