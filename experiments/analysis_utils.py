@@ -36,6 +36,22 @@ try:
 except ImportError:
     HAS_SCIPY = False
 
+# Try to import simple_crypt_count from known locations
+HAS_CRYPT_COUNT = False
+_crypt_count_mod = None
+for _subdir in ['ECMStiffnessSweep', 'CryptBudding', '.']:
+    _candidate = os.path.join(os.path.dirname(os.path.abspath(__file__)), _subdir)
+    if os.path.isfile(os.path.join(_candidate, 'simple_crypt_count.py')):
+        sys.path.insert(0, _candidate)
+        try:
+            import simple_crypt_count as _crypt_count_mod
+            HAS_CRYPT_COUNT = True
+            break
+        except ImportError:
+            sys.path.pop(0)
+if not HAS_CRYPT_COUNT:
+    pass  # silently skip — crypt counting plots will be omitted
+
 
 # =====================================================================
 # Figure style
@@ -240,6 +256,7 @@ def load_sweep_data(base_dir, param_name, param_json_path=None, model_filter=Non
             continue
 
         data = load_crypt_summary(csv_path)
+        data['_data_dir'] = os.path.dirname(csv_path)
         sweep[model][param_val].append((run_num, data))
 
     return dict(sweep)
@@ -624,11 +641,170 @@ def compute_lumen_force_timeseries(data_dir, dt=None):
 
 
 # =====================================================================
+# Crypt count time-series (2D models only)
+# =====================================================================
+
+def compute_crypt_count_timeseries(data_dir, model_type, max_timesteps=30):
+    """
+    Compute crypt count and circularity at sampled timesteps for one run.
+
+    Args:
+        data_dir: Path to results_from_time_* directory
+        model_type: 'node2d' or 'vertex2d'
+        max_timesteps: Max number of timesteps to sample (for speed)
+
+    Returns:
+        dict with 'time', 'num_crypts', 'circularity' numpy arrays,
+        or empty dict if not applicable.
+    """
+    if not HAS_CRYPT_COUNT:
+        return {}
+    if model_type not in ('node2d', 'vertex2d'):
+        return {}
+
+    # Read time axis from crypt_summary.csv
+    csv_path = os.path.join(data_dir, 'crypt_summary.csv')
+    if not os.path.isfile(csv_path):
+        return {}
+    csv_data = load_crypt_summary(csv_path)
+    csv_times = csv_data.get('time', np.array([]))
+    if len(csv_times) == 0:
+        return {}
+
+    # Find boundary files
+    if model_type == 'node2d':
+        all_files = sorted(glob.glob(os.path.join(data_dir, 'outline_*.vtp')))
+        def _get_step(f):
+            try:
+                return int(os.path.basename(f).replace('outline_', '').replace('.vtp', ''))
+            except ValueError:
+                return -1
+    else:
+        all_files = sorted(glob.glob(os.path.join(data_dir, 'results_*.vtu')))
+        def _get_step(f):
+            try:
+                return int(os.path.basename(f).replace('results_', '').replace('.vtu', ''))
+            except ValueError:
+                return -1
+
+    all_files = [f for f in all_files if _get_step(f) >= 0]
+    all_files.sort(key=_get_step)
+    if not all_files:
+        return {}
+
+    # Subsample indices (always include first and last)
+    n = len(all_files)
+    if n > max_timesteps:
+        indices = sorted(set(
+            [0, n - 1] +
+            list(np.linspace(0, n - 1, max_timesteps, dtype=int))
+        ))
+    else:
+        indices = list(range(n))
+
+    result_times = []
+    result_crypts = []
+    result_circ = []
+
+    for idx in indices:
+        f = all_files[idx]
+        # Map file index to time: outline/VTU file i corresponds to CSV row i
+        if idx < len(csv_times):
+            t = csv_times[idx]
+        else:
+            continue
+
+        try:
+            if model_type == 'node2d':
+                boundary, _ = _crypt_count_mod.load_outline_from_vtp(f)
+            else:
+                boundary, _ = _crypt_count_mod.load_boundary_from_vtu(f)
+
+            result = _crypt_count_mod.count_crypts_simple_method(
+                boundary, boundary_is_ordered=True)
+            result_times.append(t)
+            result_crypts.append(result.num_crypts)
+            result_circ.append(result.circularity)
+        except Exception:
+            continue
+
+    if not result_times:
+        return {}
+
+    return {
+        'time': np.array(result_times),
+        'num_crypts': np.array(result_crypts, dtype=float),
+        'circularity': np.array(result_circ, dtype=float),
+    }
+
+
+def enrich_sweep_with_crypt_counts(sweep_data, model_type, max_timesteps=30):
+    """
+    Compute crypt count timeseries for every run in a sweep and add
+    'num_crypts' and 'circularity' columns to each run's data dict.
+
+    Only applies to node2d and vertex2d.  Prints progress.
+    """
+    if not HAS_CRYPT_COUNT or model_type not in ('node2d', 'vertex2d'):
+        return
+
+    total_runs = sum(len(v) for v in sweep_data.values())
+    done = 0
+
+    for pval in sorted(sweep_data.keys()):
+        for run_num, data in sweep_data[pval]:
+            done += 1
+            data_dir = data.get('_data_dir')
+            if not data_dir:
+                continue
+
+            print(f"\r    Crypt counting: {done}/{total_runs} "
+                  f"(param={pval}, run={run_num})", end='', flush=True)
+
+            cc = compute_crypt_count_timeseries(data_dir, model_type,
+                                                max_timesteps)
+            if cc:
+                data['num_crypts'] = cc['num_crypts']
+                data['circularity'] = cc['circularity']
+                # Use the crypt-count time grid for these columns
+                data['_cc_time'] = cc['time']
+
+    if total_runs > 0:
+        print()  # newline after progress
+
+
+def save_crypt_count_csv(sweep_data, param_name, output_path, model_type=''):
+    """Save per-run crypt count timeseries to CSV."""
+    rows = []
+    for pval in sorted(sweep_data.keys()):
+        for run_num, data in sweep_data[pval]:
+            cc_time = data.get('_cc_time')
+            cc_n = data.get('num_crypts')
+            cc_c = data.get('circularity')
+            if cc_time is None or cc_n is None:
+                continue
+            for i in range(len(cc_time)):
+                rows.append([model_type, pval, run_num, cc_time[i],
+                             cc_n[i], cc_c[i]])
+
+    if not rows:
+        return
+
+    with open(output_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['model', param_name, 'replicate', 'time',
+                         'num_crypts', 'circularity'])
+        writer.writerows(rows)
+    print(f"  Saved crypt count CSV: {output_path}")
+
+
+# =====================================================================
 # Plotting functions
 # =====================================================================
 
 def plot_timeseries_by_param(sweep_data, column, param_name, param_unit,
-                             ylabel, title, output_path, model_type=None):
+                             ylabel, title, output_path, model_type=None,
+                             time_col='time'):
     """
     Plot a time-series column with one line per parameter value.
     Mean line with ±1 SD shading, across replicates.
@@ -642,7 +818,8 @@ def plot_timeseries_by_param(sweep_data, column, param_name, param_unit,
     fig, ax = plt.subplots(figsize=(10, 5))
     for pval in param_vals:
         runs = sweep_data[pval]
-        times, mean, std, n = aggregate_timeseries(runs, column)
+        times, mean, std, n = aggregate_timeseries(runs, column,
+                                                    time_col=time_col)
         if len(times) == 0:
             continue
         colour = colours[pval]
@@ -842,12 +1019,14 @@ def save_summary_csv(sweep_data, param_name, output_path, model_type=''):
         writer = csv.writer(f)
         writer.writerow(['model', param_name, 'replicate', 'final_cells',
                          'final_mean_r', 'final_var_r', 'final_r_range',
-                         'final_max_vol', 'final_min_vol'])
+                         'final_max_vol', 'final_min_vol',
+                         'final_num_crypts', 'final_circularity'])
         for pval in param_vals:
             for run_num, data in sweep_data[pval]:
                 row = [model_type, pval, run_num]
                 for col in ['num_cells', 'mean_r', 'var_r', 'r_range',
-                            'max_vol', 'min_vol']:
+                            'max_vol', 'min_vol',
+                            'num_crypts', 'circularity']:
                     if col in data and len(data[col]) > 0:
                         row.append(data[col][-1])
                     else:
@@ -905,6 +1084,55 @@ def generate_standard_plots(sweep_data, param_name, param_unit, model_type,
         path = os.path.join(plots_dir, f'{prefix}_{col}_vs_{param_name}.png')
         plot_mean_vs_param(sweep_data, col, param_name, param_unit,
                            ylabel, title, path, model_type, logx=logx)
+
+    # Crypt count and circularity time-series (2D models only)
+    if HAS_CRYPT_COUNT and model_type in ('node2d', 'vertex2d'):
+        print(f"  Computing crypt count timeseries for {model_type}...")
+        enrich_sweep_with_crypt_counts(sweep_data, model_type)
+
+        # Check if any data was added
+        has_cc = any(
+            'num_crypts' in d
+            for runs in sweep_data.values()
+            for _, d in runs
+        )
+        if has_cc:
+            for col, ylabel, title in [
+                ('num_crypts', 'Number of Crypts',
+                 'Crypt Count Over Time'),
+                ('circularity', 'Circularity',
+                 'Circularity Over Time'),
+            ]:
+                path = os.path.join(plots_dir,
+                                    f'{prefix}_{col}_timeseries.png')
+                plot_timeseries_by_param(sweep_data, col,
+                                         param_name, param_unit,
+                                         ylabel, title, path, model_type,
+                                         time_col='_cc_time')
+
+            # Final-value plots for crypt count and circularity
+            for col, ylabel, title in [
+                ('num_crypts', 'Final Crypt Count',
+                 'Final Crypt Count vs ' + param_name),
+                ('circularity', 'Final Circularity',
+                 'Final Circularity vs ' + param_name),
+            ]:
+                path = os.path.join(plots_dir,
+                                    f'{prefix}_{col}_boxplot.png')
+                plot_final_value_boxplot(sweep_data, col,
+                                         param_name, param_unit,
+                                         ylabel, title, path, model_type)
+                path = os.path.join(plots_dir,
+                                    f'{prefix}_{col}_vs_{param_name}.png')
+                plot_mean_vs_param(sweep_data, col,
+                                    param_name, param_unit,
+                                    ylabel, title, path, model_type,
+                                    logx=logx)
+
+            # Save crypt count timeseries CSV
+            cc_csv = os.path.join(plots_dir,
+                                  f'{prefix}_crypt_count_timeseries.csv')
+            save_crypt_count_csv(sweep_data, param_name, cc_csv, model_type)
 
     # Print and save summary table
     print_summary_table(sweep_data, param_name, model_type)

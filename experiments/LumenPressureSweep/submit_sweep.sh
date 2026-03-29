@@ -11,6 +11,9 @@
 # Sweeps lumen pressure while keeping ECM stiffness fixed at the JSON default.
 # Uses the -pressure CLI flag available in CryptBuddingApp.
 #
+# Phase 3 (analyse): Single job — run analysis scripts, generate plots.
+#                    Starts after all sims finish.
+#
 # Usage (always run directly, never with sbatch):
 #   ./submit_sweep.sh node2d
 #   ./submit_sweep.sh vertex2d
@@ -20,6 +23,10 @@
 # Prerequisites:
 #   1. Container image at /user/work/$(whoami)/containers/tissuemorphology.sif
 #   2. Source code at /user/work/$(whoami)/TissueMorphology (or auto-cloned)
+#
+# To download results locally after jobs complete:
+#   scp -r sv22482@bp1-login.acrc.bris.ac.uk:/user/work/sv22482/sim_output/analysis_lumen_pressure_<TIMESTAMP>/plots/ ./plots/
+#   (The exact command with timestamp is printed when you run this script)
 # =============================================================================
 
 # ---------- SBATCH defaults (used by simulation array; overridden for build) --
@@ -77,6 +84,8 @@ if [ -z "${SLURM_JOB_ID}" ]; then
     echo "  Build job:  ${BUILD_JOB_ID}"
 
     # Phase 2: Simulation arrays
+    SIM_JOB_IDS=()
+    RUN_TAGS_CSV=""
     for model in "${MODELS_TO_RUN[@]}"; do
         SIM_JOB_ID=$(sbatch --parsable \
             --job-name="Lumen_${model}" \
@@ -84,10 +93,34 @@ if [ -z "${SLURM_JOB_ID}" ]; then
             --export=ALL,SWEEP_PHASE=run,SWEEP_TIMESTAMP=${SWEEP_TIMESTAMP} \
             "$0" "${model}")
 
+        SIM_JOB_IDS+=("$SIM_JOB_ID")
+        RUN_TAGS_CSV="${RUN_TAGS_CSV:+${RUN_TAGS_CSV},}${SIM_JOB_ID}_${model}_${SWEEP_TIMESTAMP}"
+
         echo "  ${model} sim:   ${SIM_JOB_ID}  (depends on build ${BUILD_JOB_ID})"
-        echo "    Output: /user/work/$(whoami)/sim_output/${SIM_JOB_ID}_${model}_${SWEEP_TIMESTAMP}/"
     done
 
+    # Phase 3: Analysis
+    DEP_STR=$(IFS=:; echo "${SIM_JOB_IDS[*]}")
+    ANALYSIS_OUTPUT="/user/work/$(whoami)/sim_output/analysis_lumen_pressure_${SWEEP_TIMESTAMP}"
+
+    ANALYSE_JOB_ID=$(sbatch --parsable \
+        --job-name="Analyse_LumenPressure" \
+        --dependency=afterany:${DEP_STR} \
+        --array=0 \
+        --cpus-per-task=2 \
+        --mem-per-cpu=8G \
+        --time=02:00:00 \
+        --export=ALL,SWEEP_PHASE=analyse,SWEEP_TIMESTAMP=${SWEEP_TIMESTAMP},ANALYSIS_RUN_TAGS=${RUN_TAGS_CSV},ANALYSIS_OUTPUT=${ANALYSIS_OUTPUT} \
+        --output="${BASE_LOG_DIR}/analyse_%j.out" \
+        --error="${BASE_LOG_DIR}/analyse_%j.err" \
+        "$0" "node2d")
+
+    echo ""
+    echo "  Analysis:  ${ANALYSE_JOB_ID}  (depends on all sims: ${DEP_STR})"
+    echo "    Results: ${ANALYSIS_OUTPUT}/plots/"
+    echo ""
+    echo "  To download plots locally after completion:"
+    echo "    scp -r $(whoami)@bp1-login.acrc.bris.ac.uk:${ANALYSIS_OUTPUT}/plots/ ./plots/"
     echo ""
     exit 0
 fi
@@ -174,6 +207,51 @@ if [ "${SWEEP_PHASE}" = "build" ]; then
     fi
 
     echo "Build successful: ${HOST_APP_PATH}"
+    exit 0
+fi
+
+# #############################################################################
+# PHASE: ANALYSE
+# #############################################################################
+if [ "${SWEEP_PHASE}" = "analyse" ]; then
+
+    ANALYSIS_OUTPUT="${ANALYSIS_OUTPUT:-/user/work/$(whoami)/sim_output/analysis_lumen_pressure_${SWEEP_TIMESTAMP}}"
+    MERGED_DIR="${ANALYSIS_OUTPUT}/data"
+    PLOTS_OUT="${ANALYSIS_OUTPUT}/plots"
+    mkdir -p "${MERGED_DIR}" "${PLOTS_OUT}"
+
+    LOG_FILE="${ANALYSIS_OUTPUT}/analysis.log"
+    exec > >(tee -a "${LOG_FILE}")
+    exec 2>&1
+
+    echo "============================================"
+    echo "  Lumen Pressure Sweep — Analysis Phase"
+    echo "  Start Time:   $(date)"
+    echo "============================================"
+
+    # Symlink job output dirs into merged directory
+    IFS=',' read -ra RUN_TAGS <<< "${ANALYSIS_RUN_TAGS}"
+    SIM_OUTPUT_BASE="/user/work/$(whoami)/sim_output"
+    for tag in "${RUN_TAGS[@]}"; do
+        [ -d "${SIM_OUTPUT_BASE}/${tag}" ] && \
+            ln -sf "${SIM_OUTPUT_BASE}/${tag}" "${MERGED_DIR}/${tag}"
+    done
+
+    module load languages/python 2>/dev/null || module load python 2>/dev/null || true
+
+    SCRIPT_DIR="${SOURCE_DIR}/experiments/LumenPressureSweep"
+
+    echo "  Running analysis..."
+    python3 "${SCRIPT_DIR}/analyse_and_plot.py" \
+        --data-dir "${MERGED_DIR}" \
+        -o "${PLOTS_OUT}" \
+        2>&1 | tee "${PLOTS_OUT}/plot_generation.log" || true
+
+    echo ""
+    echo "============================================"
+    echo "  Analysis Complete — $(date)"
+    echo "  Plots: ${PLOTS_OUT}/"
+    echo "============================================"
     exit 0
 fi
 
