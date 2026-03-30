@@ -10,7 +10,7 @@
   "simulation": {
     "modelType": "node3d",
     "endTime": 168.0,
-    "dt": 0.005,
+    "dt": 0.001,
     "relaxationTime": 10.0,
     "runNumber": 0
   },
@@ -18,9 +18,9 @@
   "features": {
     "enableRelaxation": false,
     "enableLumenPressure": true,
-    "enableApicalConstriction": true,
+    "enableApicalConstriction": false,
     "enableCurvatureBending": true,
-    "enableCellPolarity": true,
+    "enableCellPolarity": false,
     "enableDifferentialAdhesion": false,
     "enableEcmConfinement": true,
     "enableGhostNodeECM": true,
@@ -49,15 +49,12 @@
     },
 
     "LumenPressureForce": {
-      "lumenPressure": 0.4
-    },
-
-    "ApicalConstrictionForce": {
-      "apicalConstrictionStrength": 2.0
+      "lumenPressure": 2.0,
+      "lumenBulkModulus": 10.0
     },
 
     "SurfaceSmoothingForce": {
-      "bendingStiffness": 20.0,
+      "bendingStiffness": 5.0,
       "gammaStemScale": 0.7,
       "gammaTransitScale": 1.0,
       "gammaDiffScale": 1.3
@@ -68,10 +65,11 @@
       "polarityAlignmentStrength": 0.3
     },
 
+
     "ECMConfinementForce": {
       "ecmStiffness": 1.0,
       "bmRadiusFraction": 1.25,
-      "ecmMaxRadiusFraction": 30.0,
+      "ecmMaxRadiusFraction": 20.0,
       "ecmDomainHalf": 7.0,
       "ecmGridSpacing": 1.0,
       "ecmGridType": "hex",
@@ -86,7 +84,8 @@
       "ghostAnisotropyStrength": 0.5,
       "ghostCellGhostRestLength": 1.0,
       "ghostCellGhostCutoff": 1.5,
-      "ghostSpringRestLength": -1.0,
+      "ghostSpringRestLength": 1.0,
+      "ghostGridSpacing": 1.0,
       "ghostRemovalCheckInterval": 10,
       "ViscoelasticECM": {
         "ghostRelaxedStiffness": 5.0,

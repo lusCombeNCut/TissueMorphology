@@ -10,7 +10,7 @@
   "simulation": {
     "modelType": "node2d",
     "endTime": 168.0,
-    "dt": 0.005,
+    "dt": 0.001,
     "relaxationTime": 10.0,
     "runNumber": 0
   },
@@ -18,7 +18,7 @@
   "features": {
     "enableRelaxation": false,
     "enableLumenPressure": true,
-    "enableApicalConstriction": true,
+    "enableApicalConstriction": false,
     "enableCurvatureBending": true,
     "enableCellPolarity": false,
     "enableDifferentialAdhesion": true,
@@ -60,16 +60,12 @@
       "gammaDiffScale": 1.3
     },
 
-    "ApicalConstrictionForce": {
-      "apicalConstrictionStrength": 3.0
-    },
-
     "ECMConfinementForce": {
       "ecmStiffness": 5.0,
       "ecmSpringRestLength": 0.0,
       "ecmInteractionCutoff": 1.5,
       "bmRadiusFraction": 1.25,
-      "ecmMaxRadiusFraction": 30.0,
+      "ecmMaxRadiusFraction": 20.0,
       "ecmGridSpacing": 1.0,
       "ecmGridType": "hex",
       "ecmDegradationRate": 0.02,
@@ -81,11 +77,11 @@
       "ghostRemovalThreshold": 0.05,
       "ghostFibreRemodelingRate": 0.1,
       "ghostAnisotropyStrength": 0.5,
-      "ghostCellGhostRestLength": 0.0,
+      "ghostCellGhostRestLength": 1.0,
       "ghostCellGhostCutoff": 1.5,
-      "ghostSpringRestLength": -1.0,
-      "ghostGridSpacing": -1.0,
-      "ghostRemovalCheckInterval": 100,
+      "ghostSpringRestLength": 1.0,
+      "ghostGridSpacing": 1.0,
+      "ghostRemovalCheckInterval": 10,
       "ViscoelasticECM": {
         "ghostRelaxedStiffness": 5.0,
         "ghostRelaxationModulus": 1.0,

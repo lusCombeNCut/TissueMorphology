@@ -16,15 +16,19 @@
   },
 
   "features": {
-    "enableRelaxation": true,
+    "enableRelaxation": false,
     "enableLumenPressure": true,
-    "enableApicalConstriction": true,
+    "enableApicalConstriction": false,
+    "enableCurvatureBending": false,
+    "enableCellPolarity": false,
     "enableDifferentialAdhesion": true,
     "enableEcmConfinement": true,
     "enableGhostNodeECM": true,
     "enableViscoelasticECM": true,
+    "enableEcmGuidance": false,
     "enableSloughing": false,
     "enableLumenHole": true,
+    "useTopologyBasedSprings": false,
     "enableContinuousPvd": false
   },
 
@@ -43,16 +47,12 @@
       "lumenBulkModulus": 10.0
     },
 
-    "ApicalConstrictionForce": {
-      "apicalConstrictionStrength": 3.0
-    },
-
     "ECMConfinementForce": {
       "ecmStiffness": 5.0,
       "ecmSpringRestLength": 0.0,
       "ecmInteractionCutoff": 1.5,
       "bmRadiusFraction": 1.25,
-      "ecmMaxRadiusFraction": 30.0,
+      "ecmMaxRadiusFraction": 20.0,
       "ecmGridSpacing": 0.5,
       "ecmGridType": "hex",
       "ecmDegradationRate": 0.02,
@@ -68,7 +68,7 @@
       "ghostCellGhostCutoff": 1.5,
       "ghostSpringRestLength": 1.0,
       "ghostGridSpacing": 1.0,
-      "ghostRemovalCheckInterval": 100,
+      "ghostRemovalCheckInterval": 10,
       "ViscoelasticECM": {
         "ghostRelaxedStiffness": 5.0,
         "ghostRelaxationModulus": 1.0,
