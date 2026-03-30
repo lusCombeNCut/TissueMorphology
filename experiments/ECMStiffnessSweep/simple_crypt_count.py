@@ -350,50 +350,44 @@ def _parse_vtu_appended(root, vtu_path):
 
 
 def _decode_appended_array(appended_data, offset, expected_count, dtype):
-    """Decode a base64-encoded array from VTK appended data."""
+    """Decode a base64-encoded array from VTK appended data.
+
+    VTK base64 appended format encodes each DataArray independently.
+    The 'offset' attribute is a character offset into the base64 string
+    (not a byte offset into decoded data). Each block is:
+        base64_encode( 4-byte-UInt32-size-header + raw-data-bytes )
+    """
     import base64
     import struct
-    
-    # Map VTK types to struct format
+
     type_map = {
         'Float64': ('d', 8),
         'Float32': ('f', 4),
-        'Int64': ('q', 8),
-        'Int32': ('i', 4),
-        'UInt8': ('B', 1),
+        'Int64':   ('q', 8),
+        'Int32':   ('i', 4),
+        'UInt8':   ('B', 1),
     }
-    
+
     if dtype not in type_map:
         return None
-    
+
     fmt, size = type_map[dtype]
-    
-    # The appended data has a 4-byte header (UInt32) giving the size in bytes
-    # Then the actual data follows
-    
-    # Base64 encodes 3 bytes into 4 characters
-    # Offset is in decoded bytes, need to find corresponding position in encoded string
-    
-    # VTK appended data: each array is prefixed with a 4-byte size header
-    # The offset points to the start of THIS array's header
-    
+
     try:
-        # Decode the header first (4 bytes = ~6 base64 chars, but need alignment)
-        # This is complex because base64 encoding chunks data
-        # Simpler: decode everything and slice
-        
-        decoded = base64.b64decode(appended_data)
-        
-        # Read the size header at the given offset
-        array_size = struct.unpack('<I', decoded[offset:offset+4])[0]
-        
-        # Read the actual array data
-        data_start = offset + 4
-        data_end = data_start + array_size
-        
-        n_elements = array_size // size
-        arr = np.frombuffer(decoded[data_start:data_end], dtype=np.dtype(f'<{fmt}'))
-        
+        block = appended_data[offset:]
+
+        # Read the 4-byte size header. The first 12 base64 chars (a multiple of 4)
+        # decode to 9 bytes — enough to cover the 4-byte header.
+        header_bytes = base64.b64decode(block[:12])
+        array_size = struct.unpack('<I', header_bytes[0:4])[0]
+
+        # Decode the full block (header + data) in one shot.
+        total_bytes = 4 + array_size
+        b64_len = ((total_bytes + 2) // 3) * 4
+        decoded_block = base64.b64decode(block[:b64_len])
+
+        raw_bytes = decoded_block[4: 4 + array_size]
+        arr = np.frombuffer(raw_bytes, dtype=np.dtype(f'<{fmt}'))
         return arr
     except Exception as e:
         print(f"Warning: Could not decode appended array: {e}")
