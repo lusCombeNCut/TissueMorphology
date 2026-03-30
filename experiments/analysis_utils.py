@@ -96,12 +96,34 @@ def find_summary_csvs(base_dir):
     """
     Recursively find all crypt_summary.csv files under base_dir.
 
+    When a run directory contains multiple results_from_time_* subdirectories
+    (e.g. a relaxation phase followed by the main simulation phase), only the
+    highest-numbered one is included so that earlier-phase data is ignored.
+
     Returns list of (csv_path, params_json_path_or_None).
     """
+    import re as _re
     results = []
     for root, dirs, files in os.walk(base_dir, followlinks=True):
         if 'crypt_summary.csv' in files:
             csv_path = os.path.join(root, 'crypt_summary.csv')
+
+            # If this directory is a results_from_time_N subdirectory, skip it
+            # when a later phase exists alongside it.
+            basename = os.path.basename(root)
+            m = _re.match(r'results_from_time_(\d+)$', basename)
+            if m:
+                phase_time = int(m.group(1))
+                parent = os.path.dirname(root)
+                sibling_phases = [
+                    int(sm.group(1))
+                    for entry in os.listdir(parent)
+                    for sm in [_re.match(r'results_from_time_(\d+)$', entry)]
+                    if sm
+                ]
+                if sibling_phases and phase_time < max(sibling_phases):
+                    continue  # a later phase exists; skip this earlier one
+
             # params.json lives one or two levels up from results_from_time_*
             params_path = None
             for parent in [root, os.path.dirname(root), os.path.dirname(os.path.dirname(root))]:

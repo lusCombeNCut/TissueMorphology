@@ -106,7 +106,7 @@ if [ -z "${SLURM_JOB_ID}" ]; then
             "$0" "${model}")
 
         SIM_JOB_IDS+=("$SIM_JOB_ID")
-        RUN_TAGS_CSV="${RUN_TAGS_CSV:+${RUN_TAGS_CSV},}${SIM_JOB_ID}_${model}_${SWEEP_TIMESTAMP}"
+        RUN_TAGS_CSV="${RUN_TAGS_CSV:+${RUN_TAGS_CSV}|}${SIM_JOB_ID}_${model}_${SWEEP_TIMESTAMP}"
 
         echo "  ${model} sim:   ${SIM_JOB_ID}  (depends on build ${BUILD_JOB_ID})"
         echo "    Output: /user/work/$(whoami)/sim_output/${SIM_JOB_ID}_${model}_${SWEEP_TIMESTAMP}/"
@@ -123,7 +123,7 @@ if [ -z "${SLURM_JOB_ID}" ]; then
         --cpus-per-task=2 \
         --mem-per-cpu=8G \
         --time=02:00:00 \
-        --export=ALL,SWEEP_PHASE=analyse,SWEEP_TIMESTAMP=${SWEEP_TIMESTAMP},ANALYSIS_RUN_TAGS=${RUN_TAGS_CSV},ANALYSIS_OUTPUT=${ANALYSIS_OUTPUT} \
+        --export="ALL,SWEEP_PHASE=analyse,SWEEP_TIMESTAMP=${SWEEP_TIMESTAMP},ANALYSIS_RUN_TAGS=${RUN_TAGS_CSV},ANALYSIS_OUTPUT=${ANALYSIS_OUTPUT}" \
         --output="${BASE_LOG_DIR}/analyse_%j.out" \
         --error="${BASE_LOG_DIR}/analyse_%j.err" \
         "$0" "node2d")
@@ -277,7 +277,7 @@ if [ "${SWEEP_PHASE}" = "analyse" ]; then
     echo "============================================"
 
     # Parse RUN_TAGS
-    IFS=',' read -ra RUN_TAGS <<< "${ANALYSIS_RUN_TAGS}"
+    IFS='|' read -ra RUN_TAGS <<< "${ANALYSIS_RUN_TAGS}"
     SIM_OUTPUT_BASE="/user/work/$(whoami)/sim_output"
 
     echo "  Run tags: ${RUN_TAGS[*]}"

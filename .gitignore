@@ -17,9 +17,13 @@ visualization_output/
 invasion_analysis_output/
 ecm_comparison_output/
 *.log
+experiments/ECMStiffnessSweep/results-download/*
+experiments/ECMStiffnessSweep/failed-run-logs/*
 
 # ---- IDE / editor files ----
 .vscode/
 *.swp
 *.swo
 *~
+
+
