@@ -10,7 +10,7 @@
   "simulation": {
     "modelType": "vertex2d",
     "endTime": 168.0,
-    "dt": 0.001,
+    "dt": 0.005,
     "relaxationTime": 10.0,
     "runNumber": 0
   },

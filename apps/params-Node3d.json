@@ -29,7 +29,8 @@
     "enableSloughing": false,
     "enableLumenHole": true,
     "useTopologyBasedSprings": false,
-    "enableContinuousPvd": false
+    "enableContinuousPvd": false,
+    "enableNonNeighbourCellRepulsion": false
   },
 
   "geometry": {
@@ -42,7 +43,7 @@
 
   "forces": {
     "SpringForce": {
-      "springStiffness": 5.0,
+      "springStiffness": 15.0,
       "springCutoff": 1.5,
       "springStiffnessTAScale": 1.0,
       "springStiffnessDiffScale": 1.0
