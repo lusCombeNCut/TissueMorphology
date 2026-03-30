@@ -25,6 +25,7 @@
 #include "LocalTangentVertexBasedDivisionRule.hpp"
 
 #include "ECMConfinementForce.hpp"
+#include "NonNeighbourCellRepulsionForce.hpp"
 #include "DynamicECMField.hpp"
 #include "ECMFieldWriter.hpp"
 #include "GhostNodeEcmField.hpp"
@@ -232,6 +233,14 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
         boost::shared_ptr<ECMFieldWriter<2>> p_ecm_writer(
             new ECMFieldWriter<2>(p_ecm_field, p.samplingMultiple));
         simulator.AddSimulationModifier(p_ecm_writer);
+    }
+
+    if (p.enableNonNeighbourCellRepulsion)
+    {
+        MAKE_PTR(NonNeighbourCellRepulsionForce<2>, p_repulsion);
+        p_repulsion->SetRepulsionStiffness(p.nonNeighbourRepulsionStiffness);
+        p_repulsion->SetInteractionCutoff(p.nonNeighbourRepulsionCutoff);
+        simulator.AddForce(p_repulsion);
     }
 
     WireLumenPressure<2>(simulator, population, p);

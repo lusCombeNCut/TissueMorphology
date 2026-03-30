@@ -174,6 +174,11 @@ struct CryptBuddingParams
     double t1Threshold2d;
     double t2Threshold2d;
 
+    // Non-neighbour cell repulsion (vertex models — prevents tissue self-intersection)
+    bool enableNonNeighbourCellRepulsion;
+    double nonNeighbourRepulsionStiffness;
+    double nonNeighbourRepulsionCutoff;
+
     // Curvature bending force (Drasdo 2000 - monolayer enforcement)
     bool enableCurvatureBending;
     double bendingStiffness;
@@ -429,6 +434,10 @@ struct CryptBuddingParams
         t1Threshold2d       = 0.01;   // Chaste default; override via JSON "t1Threshold2d"
         t2Threshold2d       = 0.001;  // Chaste default; override via JSON "t2Threshold2d"
         interactionCutoff2d = 2.5;
+
+        enableNonNeighbourCellRepulsion = false;
+        nonNeighbourRepulsionStiffness  = 25.0;
+        nonNeighbourRepulsionCutoff     = 1.1;
 
         numCells3dNode       = 100;
         numCells3dVertex     = 200;
@@ -822,6 +831,7 @@ private:
         getBool("enableGhostNodeECM", enableGhostNodeECM);
         getBool("enableViscoelasticECM", enableViscoelasticECM);
         getBool("enableGhostBoundaryExpansion", enableGhostBoundaryExpansion);
+        getBool("enableNonNeighbourCellRepulsion", enableNonNeighbourCellRepulsion);
 
         // ── Time stepping ────────────────────────────────────────────
         if (configMap.count("dt"))      { getDouble("dt", dt);           dtOverridden = true; }
@@ -887,6 +897,9 @@ private:
         getDouble("bendingStiffness", bendingStiffness);
         getDouble("polarityBendingStrength", polarityBendingStrength);
         getDouble("polarityAlignmentStrength", polarityAlignmentStrength);
+
+        getDouble("nonNeighbourRepulsionStiffness", nonNeighbourRepulsionStiffness);
+        getDouble("nonNeighbourRepulsionCutoff", nonNeighbourRepulsionCutoff);
 
         // ── ECM confinement ──────────────────────────────────────────
         getDouble("ecmDomainHalf", ecmDomainHalf);
@@ -1214,6 +1227,11 @@ public:
         file << "polarityBendingStrength = " << polarityBendingStrength << "    # Epithelial bending force\n";
         file << "polarityAlignmentStrength = " << polarityAlignmentStrength << "  # Tissue polarity alignment\n\n";
 
+        file << "# Non-neighbour cell repulsion (prevents tissue self-intersection)\n";
+        file << "enableNonNeighbourCellRepulsion = " << (enableNonNeighbourCellRepulsion ? "true" : "false") << "\n";
+        file << "nonNeighbourRepulsionStiffness = " << nonNeighbourRepulsionStiffness << "\n";
+        file << "nonNeighbourRepulsionCutoff = " << nonNeighbourRepulsionCutoff << "\n\n";
+
         file << "[VertexModel]\n";
         file << "# Nagai-Honda parameters\n";
         file << "nhMembraneSurface = " << nhMembraneSurface << "\n";
@@ -1342,7 +1360,8 @@ public:
         f << "    \"enableViscoelasticECM\": " << b(enableViscoelasticECM) << ",\n";
         f << "    \"enableGhostBoundaryExpansion\": " << b(enableGhostBoundaryExpansion) << ",\n";
         f << "    \"enableContinuousPvd\": " << b(enableContinuousPvd) << ",\n";
-        f << "    \"useTopologyBasedSprings\": " << b(useTopologyBasedSprings) << "\n";
+        f << "    \"useTopologyBasedSprings\": " << b(useTopologyBasedSprings) << ",\n";
+        f << "    \"enableNonNeighbourCellRepulsion\": " << b(enableNonNeighbourCellRepulsion) << "\n";
         f << "  },\n";
 
         // ── Geometry ─────────────────────────────────────────────────
@@ -1447,6 +1466,11 @@ public:
         f << "      \"apicalApicalAdhesion\": " << apicalApicalAdhesion << ",\n";
         f << "      \"basalBasalAdhesion\": " << basalBasalAdhesion << ",\n";
         f << "      \"apicalBasalAdhesion\": " << apicalBasalAdhesion << "\n";
+        f << "    },\n";
+
+        f << "    \"NonNeighbourCellRepulsionForce\": {\n";
+        f << "      \"nonNeighbourRepulsionStiffness\": " << nonNeighbourRepulsionStiffness << ",\n";
+        f << "      \"nonNeighbourRepulsionCutoff\": " << nonNeighbourRepulsionCutoff << "\n";
         f << "    }\n";
 
         f << "  },\n";

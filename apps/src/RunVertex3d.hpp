@@ -50,6 +50,7 @@
 #include "ViscoelasticGhostNodeEcmField.hpp"
 #include "ViscoelasticGhostNodeEcmForce.hpp"
 #include "ViscoelasticGhostNodeEcmWriter.hpp"
+#include "NonNeighbourCellRepulsionForce.hpp"
 
 #include "GeometricalTargetVolumeModifier.hpp"
 #include "CellVolumesWriter.hpp"
@@ -236,6 +237,14 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     p_bm->SetBasementMembraneParameter(p.bmStiffnessVertex);
     p_bm->SetTargetRadius(p.organoidRadius3d + height + p.bmOffset3dVertex);
     simulator.AddForce(p_bm);
+
+    if (p.enableNonNeighbourCellRepulsion)
+    {
+        MAKE_PTR(NonNeighbourCellRepulsionForce<3>, p_repulsion);
+        p_repulsion->SetRepulsionStiffness(p.nonNeighbourRepulsionStiffness);
+        p_repulsion->SetInteractionCutoff(p.nonNeighbourRepulsionCutoff);
+        simulator.AddForce(p_repulsion);
+    }
 
     // ------------------------------------------------------------------
     // ECM field (shared between confinement and guidance forces)

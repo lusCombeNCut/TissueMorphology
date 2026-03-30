@@ -29,7 +29,8 @@
     "enableSloughing": false,
     "enableLumenHole": true,
     "useTopologyBasedSprings": false,
-    "enableContinuousPvd": false
+    "enableContinuousPvd": false,
+    "enableNonNeighbourCellRepulsion": true
   },
 
   "geometry": {
@@ -107,6 +108,11 @@
       "apicalApicalAdhesion": 1.2,
       "basalBasalAdhesion": 1.0,
       "apicalBasalAdhesion": 0.5
+    },
+
+    "NonNeighbourCellRepulsionForce": {
+      "nonNeighbourRepulsionStiffness": 25.0,
+      "nonNeighbourRepulsionCutoff": 1.1
     }
   },
 

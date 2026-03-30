@@ -12,7 +12,9 @@
 #include <vector>
 
 #include "AbstractForce.hpp"
+#include "MutableElement.hpp"
 #include "VertexBasedCellPopulation.hpp"
+#include "MonolayerVertexBasedCellPopulation.hpp"
 
 template<unsigned DIM>
 class NonNeighbourCellRepulsionForce : public AbstractForce<DIM>
@@ -53,9 +55,12 @@ public:
 
     void AddForceContribution(AbstractCellPopulation<DIM>& rCellPopulation) override
     {
-        if (dynamic_cast<VertexBasedCellPopulation<DIM>*>(&rCellPopulation) == nullptr)
+        auto* p_vertex_pop = dynamic_cast<VertexBasedCellPopulation<DIM>*>(&rCellPopulation);
+        auto* p_monolayer_pop = dynamic_cast<MonolayerVertexBasedCellPopulation<DIM>*>(&rCellPopulation);
+
+        if (!p_vertex_pop && !p_monolayer_pop)
         {
-            EXCEPTION("NonNeighbourCellRepulsionForce is to be used with a VertexBasedCellPopulation only");
+            EXCEPTION("NonNeighbourCellRepulsionForce is to be used with a VertexBasedCellPopulation or MonolayerVertexBasedCellPopulation only");
         }
 
         if (mRepulsionStiffness <= 0.0 || mInteractionCutoff <= 0.0)
@@ -63,30 +68,28 @@ public:
             return;
         }
 
-        VertexBasedCellPopulation<DIM>* p_population =
-            static_cast<VertexBasedCellPopulation<DIM>*>(&rCellPopulation);
-
         std::vector<CellPtr> cells;
         std::vector<unsigned> location_indices;
         std::vector<c_vector<double, DIM>> centres;
         std::vector<std::set<unsigned>> neighbours;
 
-        cells.reserve(p_population->GetNumRealCells());
-        location_indices.reserve(p_population->GetNumRealCells());
-        centres.reserve(p_population->GetNumRealCells());
-        neighbours.reserve(p_population->GetNumRealCells());
+        const unsigned num_cells = rCellPopulation.GetNumRealCells();
+        cells.reserve(num_cells);
+        location_indices.reserve(num_cells);
+        centres.reserve(num_cells);
+        neighbours.reserve(num_cells);
 
-        for (typename AbstractCellPopulation<DIM>::Iterator cell_iter = p_population->Begin();
-             cell_iter != p_population->End();
+        for (typename AbstractCellPopulation<DIM>::Iterator cell_iter = rCellPopulation.Begin();
+             cell_iter != rCellPopulation.End();
              ++cell_iter)
         {
             CellPtr p_cell = *cell_iter;
-            unsigned location_index = p_population->GetLocationIndexUsingCell(p_cell);
+            unsigned location_index = rCellPopulation.GetLocationIndexUsingCell(p_cell);
 
             cells.push_back(p_cell);
             location_indices.push_back(location_index);
-            centres.push_back(p_population->GetLocationOfCellCentre(p_cell));
-            neighbours.push_back(p_population->GetNeighbouringLocationIndices(p_cell));
+            centres.push_back(rCellPopulation.GetLocationOfCellCentre(p_cell));
+            neighbours.push_back(rCellPopulation.GetNeighbouringLocationIndices(p_cell));
         }
 
         const double cutoff_sq = mInteractionCutoff * mInteractionCutoff;
@@ -120,8 +123,20 @@ public:
                 c_vector<double, DIM> force_i = magnitude * unit;
                 c_vector<double, DIM> force_j = -force_i;
 
-                VertexElement<DIM, DIM>* p_elem_i = p_population->GetElement(loc_i);
-                VertexElement<DIM, DIM>* p_elem_j = p_population->GetElement(loc_j);
+                // Get elements via the appropriate population type (both return
+                // subclasses of MutableElement, which provides GetNumNodes/GetNode).
+                MutableElement<DIM, DIM>* p_elem_i;
+                MutableElement<DIM, DIM>* p_elem_j;
+                if (p_vertex_pop)
+                {
+                    p_elem_i = p_vertex_pop->GetElement(loc_i);
+                    p_elem_j = p_vertex_pop->GetElement(loc_j);
+                }
+                else
+                {
+                    p_elem_i = p_monolayer_pop->GetElement(loc_i);
+                    p_elem_j = p_monolayer_pop->GetElement(loc_j);
+                }
 
                 c_vector<double, DIM> per_node_i = force_i / static_cast<double>(p_elem_i->GetNumNodes());
                 c_vector<double, DIM> per_node_j = force_j / static_cast<double>(p_elem_j->GetNumNodes());

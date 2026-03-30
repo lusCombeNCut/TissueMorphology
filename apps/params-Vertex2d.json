@@ -29,7 +29,8 @@
     "enableSloughing": false,
     "enableLumenHole": true,
     "useTopologyBasedSprings": false,
-    "enableContinuousPvd": false
+    "enableContinuousPvd": false,
+    "enableNonNeighbourCellRepulsion": true
   },
 
   "geometry": {
@@ -103,6 +104,11 @@
       "gammaStemScale": 0.7,
       "gammaTransitScale": 1.0,
       "gammaDiffScale": 1.3
+    },
+
+    "NonNeighbourCellRepulsionForce": {
+      "nonNeighbourRepulsionStiffness": 25.0,
+      "nonNeighbourRepulsionCutoff": 1.1
     }
   },
 
