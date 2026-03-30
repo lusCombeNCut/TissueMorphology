@@ -81,7 +81,7 @@ def run_crypt_counting(base_dir, model_type, plots_dir):
                 result = count_crypts_simple_method(boundary,
                              boundary_is_ordered=True)
 
-            crypt_results[stiffness].append((result.n_crypts, result.circularity))
+            crypt_results[stiffness].append((result.num_crypts, result.circularity))
         except Exception as e:
             print(f"  Crypt count error (stiffness={stiffness}): {e}")
             continue

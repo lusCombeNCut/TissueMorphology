@@ -283,6 +283,8 @@ def _parse_vtu_appended(root, vtu_path):
         if encoding != 'base64':
             raise ValueError(f"Unsupported encoding: {encoding}")
         text = ad.text
+        if text:
+            text = text.strip()
         if text and text.startswith('_'):
             appended_data = text[1:]  # Skip leading underscore
     

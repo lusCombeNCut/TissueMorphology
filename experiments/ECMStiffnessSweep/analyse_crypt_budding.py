@@ -155,7 +155,7 @@ def count_crypts_2d(positions, min_prominence=0.5, min_angular_sep_deg=30.0):
     theta = np.arctan2(dy, dx)
     r = np.hypot(dx, dy)
 
-    if r.ptp() < 1e-6:
+    if r.max() - r.min() < 1e-6:
         return 0, [], (np.array([]), np.array([]))
 
     n_bins = max(36, len(positions) // 2)
@@ -231,7 +231,7 @@ def count_crypts_3d(positions, min_prominence=1.0, min_sep_deg=30.0):
     rel = positions - centroid
     r = np.linalg.norm(rel, axis=1)
 
-    if r.ptp() < 1e-6:
+    if r.max() - r.min() < 1e-6:
         return 0, [], {}
 
     # Spherical coords
