@@ -10,7 +10,7 @@
   "simulation": {
     "modelType": "vertex2d",
     "endTime": 168.0,
-    "dt": 0.005,
+    "dt": 0.0005,
     "relaxationTime": 10.0,
     "runNumber": 0
   },
@@ -56,8 +56,8 @@
       "ecmMaxRadiusFraction": 20.0,
       "ecmGridSpacing": 0.5,
       "ecmGridType": "hex",
-      "ecmDegradationRate": 0.02,
-      "ecmDiffusionCoeff": 0.1
+      "ecmDegradationRate": 0.05,
+      "ecmDiffusionCoeff": 0.0
     },
 
     "GhostNodeECM": {

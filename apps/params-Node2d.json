@@ -55,7 +55,7 @@
     },
 
     "RingSmoothingForce": {
-      "bendingStiffness": 5.0,
+      "bendingStiffness": 20.0,
       "gammaStemScale": 0.7,
       "gammaTransitScale": 1.0,
       "gammaDiffScale": 1.3
@@ -69,8 +69,8 @@
       "ecmMaxRadiusFraction": 20.0,
       "ecmGridSpacing": 1.0,
       "ecmGridType": "hex",
-      "ecmDegradationRate": 0.02,
-      "ecmDiffusionCoeff": 0.1
+      "ecmDegradationRate": 0.05,
+      "ecmDiffusionCoeff": 0.0
     },
 
     "GhostNodeECM": {
