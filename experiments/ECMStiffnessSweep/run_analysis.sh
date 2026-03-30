@@ -35,7 +35,7 @@ MERGED_DIR="${BASE}/merged"
 ANALYSIS_OUT="${BASE}/crypt_analysis_output"
 TIMESTEP_OUT="${BASE}/timestep_analysis_output"
 PLOTS_OUT="${BASE}/plots"
-SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+SCRIPT_DIR="${SLURM_SUBMIT_DIR}"
 LOG_DIR="${BASE}"
 
 # Set log file paths (can't use $1 in #SBATCH directives, so rename after)
