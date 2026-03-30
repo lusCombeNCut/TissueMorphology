@@ -20,6 +20,8 @@
 #SBATCH --mem-per-cpu=8G
 #SBATCH --time=02:00:00
 #SBATCH --job-name=Analyse_ECMStiffness
+#SBATCH --output=/user/work/sv22482/logs/analysis_%j.out
+#SBATCH --error=/user/work/sv22482/logs/analysis_%j.err
 
 # ---------- Argument ----------
 if [ -z "$1" ]; then
