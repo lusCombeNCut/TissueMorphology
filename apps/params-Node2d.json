@@ -9,7 +9,7 @@
 
   "simulation": {
     "modelType": "node2d",
-    "endTime": 168.0,
+    "endTime": 120.0,
     "dt": 0.005,
     "relaxationTime": 10.0,
     "runNumber": 0
