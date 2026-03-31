@@ -39,7 +39,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=4G
 #SBATCH --time=12:00:00
-#SBATCH --array=0-99%20
+#SBATCH --array=0-99%100
 #SBATCH --output=/user/work/%u/logs/ecm_stiffness_sweep/slurm-%A_%a.out
 #SBATCH --error=/user/work/%u/logs/ecm_stiffness_sweep/slurm-%A_%a.err
 

@@ -10,7 +10,7 @@
   "simulation": {
     "modelType": "vertex2d",
     "endTime": 168.0,
-    "dt": 0.0005,
+    "dt": 0.001,
     "relaxationTime": 10.0,
     "runNumber": 0
   },
@@ -53,7 +53,7 @@
       "ecmSpringRestLength": 0.0,
       "ecmInteractionCutoff": 1.5,
       "bmRadiusFraction": 1.25,
-      "ecmMaxRadiusFraction": 20.0,
+      "ecmMaxRadiusFraction": 15.0,
       "ecmGridSpacing": 0.5,
       "ecmGridType": "hex",
       "ecmDegradationRate": 0.05,
@@ -69,7 +69,7 @@
       "ghostCellGhostCutoff": 1.5,
       "ghostSpringRestLength": 1.0,
       "ghostGridSpacing": 1.0,
-      "ghostRemovalCheckInterval": 10,
+      "ghostRemovalCheckInterval": 100,
       "ViscoelasticECM": {
         "ghostRelaxedStiffness": 5.0,
         "ghostRelaxationModulus": 1.0,

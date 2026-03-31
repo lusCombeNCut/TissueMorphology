@@ -66,7 +66,7 @@
       "ecmSpringRestLength": 0.0,
       "ecmInteractionCutoff": 1.5,
       "bmRadiusFraction": 1.25,
-      "ecmMaxRadiusFraction": 20.0,
+      "ecmMaxRadiusFraction": 15.0,
       "ecmGridSpacing": 1.0,
       "ecmGridType": "hex",
       "ecmDegradationRate": 0.05,
@@ -82,7 +82,7 @@
       "ghostCellGhostCutoff": 1.5,
       "ghostSpringRestLength": 1.0,
       "ghostGridSpacing": 1.0,
-      "ghostRemovalCheckInterval": 10,
+      "ghostRemovalCheckInterval": 100,
       "ViscoelasticECM": {
         "ghostRelaxedStiffness": 5.0,
         "ghostRelaxationModulus": 1.0,
