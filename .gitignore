@@ -25,7 +25,7 @@ experiments/ECMStiffnessSweep/failed-run-logs/*
 *.swp
 *.swo
 *~
-
+2d_sim_04042026/
 
 debug_output/
 docs/api/

@@ -1,67 +1,35 @@
 #!/usr/bin/env python3
-"""
-analysis_utils.py
-
-Shared analysis and plotting utilities for TissueMorphology parameter sweep
-experiments. Provides data loading from Chaste output (crypt_summary.csv,
-VTU cell data, ghost node VTP files) and standardised plotting functions.
-
-All per-experiment analyse_and_plot.py scripts import from this module.
-"""
+"""Shared analysis and plotting utilities for TissueMorphology parameter sweeps."""
 
 import os
 import sys
+import re
 import glob
 import json
 import csv
-import xml.etree.ElementTree as ET
 from collections import defaultdict
 
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
+import matplotlib.cm as cm
 
-try:
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    from matplotlib.ticker import MaxNLocator
-    import matplotlib.cm as cm
-    HAS_MATPLOTLIB = True
-except ImportError:
-    HAS_MATPLOTLIB = False
-    print("WARNING: matplotlib not available. No plots will be generated.")
-
-try:
-    from scipy.signal import find_peaks, savgol_filter
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
-
-# Try to import simple_crypt_count from known locations
-HAS_CRYPT_COUNT = False
 _crypt_count_mod = None
 for _subdir in ['ECMStiffnessSweep', 'CryptBudding', '.']:
     _candidate = os.path.join(os.path.dirname(os.path.abspath(__file__)), _subdir)
     if os.path.isfile(os.path.join(_candidate, 'simple_crypt_count.py')):
         sys.path.insert(0, _candidate)
-        try:
-            import simple_crypt_count as _crypt_count_mod
-            HAS_CRYPT_COUNT = True
-            break
-        except ImportError:
-            sys.path.pop(0)
-if not HAS_CRYPT_COUNT:
-    pass  # silently skip — crypt counting plots will be omitted
+        import simple_crypt_count as _crypt_count_mod
+        break
 
-
-# =====================================================================
-# Figure style
-# =====================================================================
 
 def setup_style():
     """Configure consistent plot aesthetics."""
-    if not HAS_MATPLOTLIB:
-        return
     plt.rcParams.update({
+        'font.family': 'serif',
+        'mathtext.fontset': 'dejavuserif',
         'figure.dpi': 150,
         'savefig.dpi': 150,
         'savefig.bbox': 'tight',
@@ -88,50 +56,41 @@ def get_param_colours(param_values):
     return {v: cmap(i / max(n - 1, 1)) for i, v in enumerate(param_values)}
 
 
-# =====================================================================
-# Data discovery — find simulation output directories
-# =====================================================================
-
 def find_summary_csvs(base_dir):
-    """
-    Recursively find all crypt_summary.csv files under base_dir.
+    """Recursively find all crypt_summary.csv files under base_dir.
 
-    When a run directory contains multiple results_from_time_* subdirectories
-    (e.g. a relaxation phase followed by the main simulation phase), only the
-    highest-numbered one is included so that earlier-phase data is ignored.
+    When multiple results_from_time_* subdirectories exist, only the
+    highest-numbered one is included.
 
     Returns list of (csv_path, params_json_path_or_None).
     """
-    import re as _re
     results = []
     for root, dirs, files in os.walk(base_dir, followlinks=True):
-        if 'crypt_summary.csv' in files:
-            csv_path = os.path.join(root, 'crypt_summary.csv')
+        if 'crypt_summary.csv' not in files:
+            continue
+        csv_path = os.path.join(root, 'crypt_summary.csv')
 
-            # If this directory is a results_from_time_N subdirectory, skip it
-            # when a later phase exists alongside it.
-            basename = os.path.basename(root)
-            m = _re.match(r'results_from_time_(\d+)$', basename)
-            if m:
-                phase_time = int(m.group(1))
-                parent = os.path.dirname(root)
-                sibling_phases = [
-                    int(sm.group(1))
-                    for entry in os.listdir(parent)
-                    for sm in [_re.match(r'results_from_time_(\d+)$', entry)]
-                    if sm
-                ]
-                if sibling_phases and phase_time < max(sibling_phases):
-                    continue  # a later phase exists; skip this earlier one
+        basename = os.path.basename(root)
+        m = re.match(r'results_from_time_(\d+)$', basename)
+        if m:
+            phase_time = int(m.group(1))
+            parent = os.path.dirname(root)
+            sibling_phases = [
+                int(sm.group(1))
+                for entry in os.listdir(parent)
+                for sm in [re.match(r'results_from_time_(\d+)$', entry)]
+                if sm
+            ]
+            if sibling_phases and phase_time < max(sibling_phases):
+                continue
 
-            # params.json lives one or two levels up from results_from_time_*
-            params_path = None
-            for parent in [root, os.path.dirname(root), os.path.dirname(os.path.dirname(root))]:
-                candidate = os.path.join(parent, 'params.json')
-                if os.path.isfile(candidate):
-                    params_path = candidate
-                    break
-            results.append((csv_path, params_path))
+        params_path = None
+        for parent in [root, os.path.dirname(root), os.path.dirname(os.path.dirname(root))]:
+            candidate = os.path.join(parent, 'params.json')
+            if os.path.isfile(candidate):
+                params_path = candidate
+                break
+        results.append((csv_path, params_path))
     return results
 
 
@@ -142,10 +101,7 @@ def load_params_json(json_path):
 
 
 def extract_param_from_json(params, param_path):
-    """
-    Extract a nested parameter value from a params dict using a dot-separated
-    path, e.g. 'forces.ECMConfinementForce.ecmStiffness'.
-    """
+    """Extract a nested parameter value using a dot-separated path."""
     keys = param_path.split('.')
     val = params
     for k in keys:
@@ -157,25 +113,18 @@ def extract_param_from_json(params, param_path):
 
 
 def extract_param_from_dir(csv_path, param_name):
-    """
-    Try to infer the swept parameter value from the directory path.
-    Works for patterns like s5.0_r0, stiffness_5.0, pressure_2.0, etc.
-    """
-    import re
+    """Infer the swept parameter value from the directory path."""
     path_str = csv_path.replace('\\', '/')
 
-    # Pattern: s<val>_r<run> (HPC output structure)
     m = re.search(r'/s([\d.]+)_r(\d+)/', path_str)
     if m and param_name in ('stiffness', 'ecmStiffness'):
         return float(m.group(1)), int(m.group(2))
 
-    # Pattern: <param_name>_<val>/run_<N>
     pattern = rf'{param_name}_([\d.eE+-]+)/run_(\d+)'
     m = re.search(pattern, path_str)
     if m:
         return float(m.group(1)), int(m.group(2))
 
-    # Pattern: stiffness_<val>/run_<N>
     m = re.search(r'stiffness_([\d.]+)/run_(\d+)', path_str)
     if m:
         return float(m.group(1)), int(m.group(2))
@@ -196,45 +145,24 @@ def identify_model_type(csv_path, params=None):
     return 'unknown'
 
 
-# =====================================================================
-# CSV data loading
-# =====================================================================
-
 def load_crypt_summary(csv_path):
-    """
-    Load crypt_summary.csv into a dict of numpy arrays.
-
-    Returns dict with keys: time, num_cells, mean_r, var_r, max_r, min_r,
-    r_range, max_vol, min_vol, stiffness.
-    """
+    """Load crypt_summary.csv into a dict of numpy arrays."""
     data = defaultdict(list)
     with open(csv_path, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
             for key, val in row.items():
                 key = key.strip()
-                try:
-                    data[key].append(float(val))
-                except (ValueError, TypeError):
-                    data[key].append(np.nan)
+                data[key].append(float(val))
     return {k: np.array(v) for k, v in data.items()}
 
 
 def load_sweep_data(base_dir, param_name, param_json_path=None, model_filter=None):
-    """
-    Load all crypt_summary.csv files from a sweep and organise by
+    """Load all crypt_summary.csv files from a sweep and organise by
     (model_type, param_value, replicate).
 
-    Args:
-        base_dir: Root directory of the sweep output
-        param_name: Name of the swept parameter (for directory inference)
-        param_json_path: Dot-separated JSON path to extract param value,
-                         e.g. 'forces.LumenPressureForce.lumenPressure'
-        model_filter: If set, only load this model type
-
     Returns:
-        sweep: dict[model_type] → dict[param_value] → list of
-               (run_number, data_dict)
+        dict[model_type] -> dict[param_value] -> list of (run_number, data_dict)
     """
     csvs = find_summary_csvs(base_dir)
     if not csvs:
@@ -244,30 +172,24 @@ def load_sweep_data(base_dir, param_name, param_json_path=None, model_filter=Non
     sweep = defaultdict(lambda: defaultdict(list))
 
     for csv_path, params_path in csvs:
-        # Load params
         params = load_params_json(params_path) if params_path else None
         model = identify_model_type(csv_path, params)
         if model_filter and model != model_filter:
             continue
 
-        # Determine swept parameter value
         param_val = None
         run_num = None
 
-        # Try JSON first
         if params and param_json_path:
             param_val = extract_param_from_json(params, param_json_path)
 
-        # Fall back to stiffness column in CSV or directory name
         if param_val is None and params:
-            # For stiffness sweeps, read from saved params
             param_val = extract_param_from_json(params,
                             'forces.ECMConfinementForce.ecmStiffness')
 
         if param_val is None:
             param_val, run_num = extract_param_from_dir(csv_path, param_name)
 
-        # Get run number from params or directory
         if run_num is None and params:
             run_num = params.get('simulation', {}).get('runNumber', 0)
         if run_num is None:
@@ -284,29 +206,14 @@ def load_sweep_data(base_dir, param_name, param_json_path=None, model_filter=Non
     return dict(sweep)
 
 
-# =====================================================================
-# Time-series aggregation
-# =====================================================================
-
 def aggregate_timeseries(runs, column, time_col='time'):
-    """
-    Aggregate a time-series column across replicates onto a common time grid.
+    """Aggregate a time-series column across replicates onto a common time grid.
 
-    Args:
-        runs: list of (run_number, data_dict)
-        column: column name to aggregate
-        time_col: time column name
-
-    Returns:
-        times: common time array
-        mean: mean values
-        std: standard deviation
-        n: number of replicates contributing at each time
+    Returns: times, mean, std, n
     """
     if not runs:
         return np.array([]), np.array([]), np.array([]), np.array([])
 
-    # Collect all time points and find common range
     all_times = []
     all_series = []
     for _, data in runs:
@@ -320,11 +227,9 @@ def aggregate_timeseries(runs, column, time_col='time'):
     if not all_times:
         return np.array([]), np.array([]), np.array([]), np.array([])
 
-    # Use the time grid from the run with the most data points
     ref_idx = max(range(len(all_times)), key=lambda i: len(all_times[i]))
     times = all_times[ref_idx]
 
-    # Interpolate all series onto the reference time grid
     values = np.full((len(all_series), len(times)), np.nan)
     for i, (t, v) in enumerate(zip(all_times, all_series)):
         if len(t) > 1:
@@ -339,78 +244,42 @@ def aggregate_timeseries(runs, column, time_col='time'):
     return times, mean, std, n
 
 
-# =====================================================================
-# VTU parsing (for cell-level data at individual timesteps)
-# =====================================================================
-
 def list_vtu_files(data_dir):
     """Find and sort VTU files by timestep number."""
     vtu_files = glob.glob(os.path.join(data_dir, 'results_*.vtu'))
     def get_step(p):
         base = os.path.basename(p)
-        try:
-            return int(base.replace('results_', '').replace('.vtu', ''))
-        except ValueError:
-            return -1
+        return int(base.replace('results_', '').replace('.vtu', ''))
     return sorted(vtu_files, key=get_step)
 
 
 def parse_vtu_cell_data(vtu_path, keys=None):
+    """Parse cell data arrays from a VTU file using VTK.
+    Returns dict mapping data array name -> numpy array.
     """
-    Parse cell data arrays from a VTU file (ASCII format).
-    Returns dict mapping data array name → numpy array.
-    If keys is specified, only return those keys.
-    """
-    try:
-        import vtk
-        from vtk.util.numpy_support import vtk_to_numpy
-        reader = vtk.vtkXMLUnstructuredGridReader()
-        reader.SetFileName(vtu_path)
-        reader.Update()
-        mesh = reader.GetOutput()
-        result = {}
-        cd = mesh.GetCellData()
-        for i in range(cd.GetNumberOfArrays()):
-            name = cd.GetArrayName(i)
-            if keys is None or name in keys:
-                arr = vtk_to_numpy(cd.GetArray(i))
-                result[name] = arr
-        pd = mesh.GetPointData()
-        for i in range(pd.GetNumberOfArrays()):
-            name = pd.GetArrayName(i)
-            if keys is None or name in keys:
-                arr = vtk_to_numpy(pd.GetArray(i))
-                result[name] = arr
-        return result
-    except ImportError:
-        pass
+    import vtk
+    from vtk.util.numpy_support import vtk_to_numpy
 
-    # Fallback: manual XML parsing (ASCII only)
+    reader = vtk.vtkXMLUnstructuredGridReader()
+    reader.SetFileName(vtu_path)
+    reader.Update()
+    mesh = reader.GetOutput()
     result = {}
-    try:
-        tree = ET.parse(vtu_path)
-        root = tree.getroot()
-        for piece in root.iter('Piece'):
-            for section_tag in ('PointData', 'CellData'):
-                for section in piece.iter(section_tag):
-                    for da in section.iter('DataArray'):
-                        name = da.get('Name', '')
-                        if keys and name not in keys:
-                            continue
-                        fmt = da.get('format', 'ascii')
-                        if fmt != 'ascii' or not da.text:
-                            continue
-                        vals = [float(v) for v in da.text.strip().split()]
-                        result[name] = np.array(vals)
-    except Exception:
-        pass
+    cd = mesh.GetCellData()
+    for i in range(cd.GetNumberOfArrays()):
+        name = cd.GetArrayName(i)
+        if keys is None or name in keys:
+            result[name] = vtk_to_numpy(cd.GetArray(i))
+    pd = mesh.GetPointData()
+    for i in range(pd.GetNumberOfArrays()):
+        name = pd.GetArrayName(i)
+        if keys is None or name in keys:
+            result[name] = vtk_to_numpy(pd.GetArray(i))
     return result
 
 
 def get_vtu_timestep_data(data_dir, column_key, dt=None):
-    """
-    Extract a per-cell data column from each VTU timestep and compute
-    summary statistics (mean, fraction > 0, etc.).
+    """Extract a per-cell data column from each VTU timestep.
 
     Returns: times, values_per_timestep (list of arrays)
     """
@@ -431,90 +300,41 @@ def get_vtu_timestep_data(data_dir, column_key, dt=None):
     return times, values
 
 
-# =====================================================================
-# Ghost node VTP parsing
-# =====================================================================
-
 def list_ghost_vtp_files(data_dir):
     """Find and sort ghost ECM VTP files by timestep."""
     vtp_files = glob.glob(os.path.join(data_dir, 'ghost_ecm_*.vtp'))
     def get_step(p):
         base = os.path.basename(p)
-        try:
-            return int(base.replace('ghost_ecm_', '').replace('.vtp', ''))
-        except ValueError:
-            return -1
+        return int(base.replace('ghost_ecm_', '').replace('.vtp', ''))
     return sorted(vtp_files, key=get_step)
 
 
 def parse_ghost_vtp(vtp_path):
-    """
-    Parse ghost node data from a VTP file.
-    Returns dict with keys: n_nodes, positions, density, anisotropy,
-    fibre_direction, rest_length_strain (if viscoelastic).
-    """
-    result = {'n_nodes': 0}
+    """Parse ghost node data from a VTP file using VTK."""
+    import vtk
+    from vtk.util.numpy_support import vtk_to_numpy
 
-    try:
-        import vtk
-        from vtk.util.numpy_support import vtk_to_numpy
-        reader = vtk.vtkXMLPolyDataReader()
-        reader.SetFileName(vtp_path)
-        reader.Update()
-        mesh = reader.GetOutput()
-        n = mesh.GetNumberOfPoints()
-        result['n_nodes'] = n
-        if n > 0:
-            pts = vtk_to_numpy(mesh.GetPoints().GetData())
-            result['positions'] = pts
-        pd = mesh.GetPointData()
-        for i in range(pd.GetNumberOfArrays()):
-            name = pd.GetArrayName(i)
-            result[name] = vtk_to_numpy(pd.GetArray(i))
-        return result
-    except ImportError:
-        pass
-
-    # Fallback: ASCII XML parsing
-    try:
-        tree = ET.parse(vtp_path)
-        root = tree.getroot()
-        for piece in root.iter('Piece'):
-            n_pts = int(piece.get('NumberOfPoints', 0))
-            result['n_nodes'] = n_pts
-            for points in piece.iter('Points'):
-                for da in points.iter('DataArray'):
-                    if da.get('format', 'ascii') == 'ascii' and da.text:
-                        vals = [float(v) for v in da.text.strip().split()]
-                        result['positions'] = np.array(vals).reshape(-1, 3)
-            for pdata in piece.iter('PointData'):
-                for da in pdata.iter('DataArray'):
-                    name = da.get('Name', '')
-                    if da.get('format', 'ascii') == 'ascii' and da.text:
-                        vals = [float(v) for v in da.text.strip().split()]
-                        nc = int(da.get('NumberOfComponents', 1))
-                        if nc > 1:
-                            result[name] = np.array(vals).reshape(-1, nc)
-                        else:
-                            result[name] = np.array(vals)
-    except Exception:
-        pass
+    reader = vtk.vtkXMLPolyDataReader()
+    reader.SetFileName(vtp_path)
+    reader.Update()
+    mesh = reader.GetOutput()
+    n = mesh.GetNumberOfPoints()
+    result = {'n_nodes': n}
+    if n > 0:
+        result['positions'] = vtk_to_numpy(mesh.GetPoints().GetData())
+    pd = mesh.GetPointData()
+    for i in range(pd.GetNumberOfArrays()):
+        name = pd.GetArrayName(i)
+        result[name] = vtk_to_numpy(pd.GetArray(i))
     return result
 
 
 def get_ghost_node_timeseries(data_dir, dt=None):
-    """
-    Extract ghost node summary statistics over time from VTP files.
-
-    Returns dict with arrays:
-        times, n_nodes, mean_density, mean_anisotropy,
-        mean_strain (viscoelastic only), mean_displacement
-    """
+    """Extract ghost node summary statistics over time from VTP files."""
     vtp_files = list_ghost_vtp_files(data_dir)
     if not vtp_files:
         return {}
 
-    # Parse first file to get initial positions for displacement calculation
     first_data = parse_ghost_vtp(vtp_files[0])
     init_positions = first_data.get('positions')
 
@@ -549,13 +369,10 @@ def get_ghost_node_timeseries(data_dir, dt=None):
             mean_strain.append(np.nan)
 
         if 'positions' in data and init_positions is not None:
-            # Compute mean displacement from initial positions
-            # Only compare nodes that still exist (by id if available)
             pos = data['positions']
             n_compare = min(len(pos), len(init_positions))
             if n_compare > 0:
-                disp = np.linalg.norm(pos[:n_compare] - init_positions[:n_compare],
-                                      axis=1)
+                disp = np.linalg.norm(pos[:n_compare] - init_positions[:n_compare], axis=1)
                 mean_displacement.append(np.mean(disp))
             else:
                 mean_displacement.append(np.nan)
@@ -575,15 +392,8 @@ def get_ghost_node_timeseries(data_dir, dt=None):
     return result
 
 
-# =====================================================================
-# Contact inhibition from VTU files
-# =====================================================================
-
 def compute_contact_inhibition_timeseries(data_dir, dt=None):
-    """
-    Compute fraction of contact-inhibited cells at each VTU timestep.
-    Reads the 'Contact inhibited' cell data array.
-    """
+    """Compute fraction of contact-inhibited cells at each VTU timestep."""
     vtu_files = list_vtu_files(data_dir)
     times = []
     fractions = []
@@ -598,19 +408,11 @@ def compute_contact_inhibition_timeseries(data_dir, dt=None):
     return np.array(times), np.array(fractions)
 
 
-# =====================================================================
-# Cell type ratios from VTU files
-# =====================================================================
-
-# Cell type IDs (from StochasticFourTypeCellCycleModel):
-# 0 = Stem, 1 = Transit-amplifying, 2 = Paneth, 3 = Enterocyte
 CELL_TYPE_NAMES = {0: 'Stem', 1: 'Transit', 2: 'Paneth', 3: 'Enterocyte'}
 
+
 def compute_cell_type_timeseries(data_dir, dt=None):
-    """
-    Compute cell type fractions at each VTU timestep.
-    Returns dict: times, and one array per cell type.
-    """
+    """Compute cell type fractions at each VTU timestep."""
     vtu_files = list_vtu_files(data_dir)
     times = []
     type_fracs = defaultdict(list)
@@ -634,14 +436,8 @@ def compute_cell_type_timeseries(data_dir, dt=None):
     return result
 
 
-# =====================================================================
-# Lumen force from VTU cell data
-# =====================================================================
-
 def compute_lumen_force_timeseries(data_dir, dt=None):
-    """
-    Compute mean lumen force magnitude at each VTU timestep.
-    """
+    """Compute mean lumen force magnitude at each VTU timestep."""
     vtu_files = list_vtu_files(data_dir)
     times = []
     mean_forces = []
@@ -662,29 +458,11 @@ def compute_lumen_force_timeseries(data_dir, dt=None):
     return np.array(times), np.array(mean_forces)
 
 
-# =====================================================================
-# Crypt count time-series (2D models only)
-# =====================================================================
-
 def compute_crypt_count_timeseries(data_dir, model_type, max_timesteps=30):
-    """
-    Compute crypt count and circularity at sampled timesteps for one run.
-
-    Args:
-        data_dir: Path to results_from_time_* directory
-        model_type: 'node2d' or 'vertex2d'
-        max_timesteps: Max number of timesteps to sample (for speed)
-
-    Returns:
-        dict with 'time', 'num_crypts', 'circularity' numpy arrays,
-        or empty dict if not applicable.
-    """
-    if not HAS_CRYPT_COUNT:
-        return {}
-    if model_type not in ('node2d', 'vertex2d'):
+    """Compute crypt count and circularity at sampled timesteps for one run."""
+    if _crypt_count_mod is None or model_type not in ('node2d', 'vertex2d'):
         return {}
 
-    # Read time axis from crypt_summary.csv
     csv_path = os.path.join(data_dir, 'crypt_summary.csv')
     if not os.path.isfile(csv_path):
         return {}
@@ -693,28 +471,20 @@ def compute_crypt_count_timeseries(data_dir, model_type, max_timesteps=30):
     if len(csv_times) == 0:
         return {}
 
-    # Find boundary files
     if model_type == 'node2d':
         all_files = sorted(glob.glob(os.path.join(data_dir, 'outline_*.vtp')))
         def _get_step(f):
-            try:
-                return int(os.path.basename(f).replace('outline_', '').replace('.vtp', ''))
-            except ValueError:
-                return -1
+            return int(os.path.basename(f).replace('outline_', '').replace('.vtp', ''))
     else:
         all_files = sorted(glob.glob(os.path.join(data_dir, 'results_*.vtu')))
         def _get_step(f):
-            try:
-                return int(os.path.basename(f).replace('results_', '').replace('.vtu', ''))
-            except ValueError:
-                return -1
+            return int(os.path.basename(f).replace('results_', '').replace('.vtu', ''))
 
     all_files = [f for f in all_files if _get_step(f) >= 0]
     all_files.sort(key=_get_step)
     if not all_files:
         return {}
 
-    # Subsample indices (always include first and last)
     n = len(all_files)
     if n > max_timesteps:
         indices = sorted(set(
@@ -730,25 +500,20 @@ def compute_crypt_count_timeseries(data_dir, model_type, max_timesteps=30):
 
     for idx in indices:
         f = all_files[idx]
-        # Map file index to time: outline/VTU file i corresponds to CSV row i
-        if idx < len(csv_times):
-            t = csv_times[idx]
+        if idx >= len(csv_times):
+            continue
+        t = csv_times[idx]
+
+        if model_type == 'node2d':
+            boundary, _ = _crypt_count_mod.load_outline_from_vtp(f)
         else:
-            continue
+            boundary, _ = _crypt_count_mod.load_boundary_from_vtu(f)
 
-        try:
-            if model_type == 'node2d':
-                boundary, _ = _crypt_count_mod.load_outline_from_vtp(f)
-            else:
-                boundary, _ = _crypt_count_mod.load_boundary_from_vtu(f)
-
-            result = _crypt_count_mod.count_crypts_simple_method(
-                boundary, boundary_is_ordered=True)
-            result_times.append(t)
-            result_crypts.append(result.num_crypts)
-            result_circ.append(result.circularity)
-        except Exception:
-            continue
+        result = _crypt_count_mod.count_crypts_simple_method(
+            boundary, boundary_is_ordered=True)
+        result_times.append(t)
+        result_crypts.append(result.num_crypts)
+        result_circ.append(result.circularity)
 
     if not result_times:
         return {}
@@ -761,13 +526,8 @@ def compute_crypt_count_timeseries(data_dir, model_type, max_timesteps=30):
 
 
 def enrich_sweep_with_crypt_counts(sweep_data, model_type, max_timesteps=30):
-    """
-    Compute crypt count timeseries for every run in a sweep and add
-    'num_crypts' and 'circularity' columns to each run's data dict.
-
-    Only applies to node2d and vertex2d.  Prints progress.
-    """
-    if not HAS_CRYPT_COUNT or model_type not in ('node2d', 'vertex2d'):
+    """Compute crypt count timeseries for every run in a sweep."""
+    if _crypt_count_mod is None or model_type not in ('node2d', 'vertex2d'):
         return
 
     total_runs = sum(len(v) for v in sweep_data.values())
@@ -783,16 +543,14 @@ def enrich_sweep_with_crypt_counts(sweep_data, model_type, max_timesteps=30):
             print(f"\r    Crypt counting: {done}/{total_runs} "
                   f"(param={pval}, run={run_num})", end='', flush=True)
 
-            cc = compute_crypt_count_timeseries(data_dir, model_type,
-                                                max_timesteps)
+            cc = compute_crypt_count_timeseries(data_dir, model_type, max_timesteps)
             if cc:
                 data['num_crypts'] = cc['num_crypts']
                 data['circularity'] = cc['circularity']
-                # Use the crypt-count time grid for these columns
                 data['_cc_time'] = cc['time']
 
     if total_runs > 0:
-        print()  # newline after progress
+        print()
 
 
 def save_crypt_count_csv(sweep_data, param_name, output_path, model_type=''):
@@ -820,28 +578,17 @@ def save_crypt_count_csv(sweep_data, param_name, output_path, model_type=''):
     print(f"  Saved crypt count CSV: {output_path}")
 
 
-# =====================================================================
-# Plotting functions
-# =====================================================================
-
 def plot_timeseries_by_param(sweep_data, column, param_name, param_unit,
                              ylabel, title, output_path, model_type=None,
                              time_col='time'):
-    """
-    Plot a time-series column with one line per parameter value.
-    Mean line with ±1 SD shading, across replicates.
-    """
-    if not HAS_MATPLOTLIB:
-        return
-
+    """Plot a time-series column with one line per parameter value (mean +/- SD)."""
     param_vals = sorted(sweep_data.keys())
     colours = get_param_colours(param_vals)
 
     fig, ax = plt.subplots(figsize=(10, 5))
     for pval in param_vals:
         runs = sweep_data[pval]
-        times, mean, std, n = aggregate_timeseries(runs, column,
-                                                    time_col=time_col)
+        times, mean, std, n = aggregate_timeseries(runs, column, time_col=time_col)
         if len(times) == 0:
             continue
         colour = colours[pval]
@@ -851,10 +598,6 @@ def plot_timeseries_by_param(sweep_data, column, param_name, param_unit,
 
     ax.set_xlabel('Time (hours)')
     ax.set_ylabel(ylabel)
-    full_title = f'{title}'
-    if model_type:
-        full_title += f' ({model_type})'
-    ax.set_title(full_title)
     ax.legend(fontsize=8, ncol=2, loc='best')
     plt.tight_layout()
     plt.savefig(output_path)
@@ -864,12 +607,7 @@ def plot_timeseries_by_param(sweep_data, column, param_name, param_unit,
 
 def plot_final_value_boxplot(sweep_data, column, param_name, param_unit,
                              ylabel, title, output_path, model_type=None):
-    """
-    Box plot of the final value of a column across replicates, per parameter.
-    """
-    if not HAS_MATPLOTLIB:
-        return
-
+    """Box plot of the final value of a column across replicates, per parameter."""
     param_vals = sorted(sweep_data.keys())
     colours = get_param_colours(param_vals)
 
@@ -891,7 +629,6 @@ def plot_final_value_boxplot(sweep_data, column, param_name, param_unit,
         patch.set_facecolor(colours[param_vals[i]])
         patch.set_alpha(0.4)
 
-    # Scatter with jitter
     for i, (pval, vals) in enumerate(zip(param_vals, final_values)):
         if vals:
             jitter = np.random.normal(0, 0.08, len(vals))
@@ -902,10 +639,6 @@ def plot_final_value_boxplot(sweep_data, column, param_name, param_unit,
     ax.set_xticklabels(labels, rotation=45)
     ax.set_xlabel(f'{param_name} ({param_unit})' if param_unit else param_name)
     ax.set_ylabel(ylabel)
-    full_title = title
-    if model_type:
-        full_title += f' ({model_type})'
-    ax.set_title(full_title)
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
@@ -915,13 +648,7 @@ def plot_final_value_boxplot(sweep_data, column, param_name, param_unit,
 def plot_mean_vs_param(sweep_data, column, param_name, param_unit,
                        ylabel, title, output_path, model_type=None,
                        use_final=True, logx=False):
-    """
-    Mean ± SD of a column value vs parameter, as errorbar plot.
-    If use_final=True, uses the last timestep value.
-    """
-    if not HAS_MATPLOTLIB:
-        return
-
+    """Mean +/- SD of a column value vs parameter, as errorbar plot."""
     param_vals = sorted(sweep_data.keys())
     means = []
     stds = []
@@ -940,10 +667,6 @@ def plot_mean_vs_param(sweep_data, column, param_name, param_unit,
     ax.set_ylabel(ylabel)
     if logx and all(v > 0 for v in param_vals):
         ax.set_xscale('log')
-    full_title = title
-    if model_type:
-        full_title += f' ({model_type})'
-    ax.set_title(full_title)
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
@@ -953,13 +676,7 @@ def plot_mean_vs_param(sweep_data, column, param_name, param_unit,
 def plot_multi_model_comparison(all_sweep_data, column, param_name, param_unit,
                                 ylabel, title, output_path, use_final=True,
                                 logx=False):
-    """
-    Overlay multiple model types on one plot (mean ± SD vs parameter).
-    all_sweep_data: dict[model_type] → dict[param_val] → runs
-    """
-    if not HAS_MATPLOTLIB:
-        return
-
+    """Overlay multiple model types on one plot (mean +/- SD vs parameter)."""
     model_styles = {
         'node2d':   ('steelblue', 'o', '-'),
         'vertex2d': ('coral',     's', '-'),
@@ -988,7 +705,6 @@ def plot_multi_model_comparison(all_sweep_data, column, param_name, param_unit,
 
     ax.set_xlabel(f'{param_name} ({param_unit})' if param_unit else param_name)
     ax.set_ylabel(ylabel)
-    ax.set_title(title)
     if logx:
         ax.set_xscale('log')
     ax.legend()
@@ -997,10 +713,6 @@ def plot_multi_model_comparison(all_sweep_data, column, param_name, param_unit,
     plt.close()
     print(f"  Saved: {output_path}")
 
-
-# =====================================================================
-# Summary table
-# =====================================================================
 
 def print_summary_table(sweep_data, param_name, model_type=''):
     """Print text summary of sweep results."""
@@ -1057,24 +769,12 @@ def save_summary_csv(sweep_data, param_name, output_path, model_type=''):
     print(f"  Saved CSV: {output_path}")
 
 
-# =====================================================================
-# Standard plot set for any parameter sweep
-# =====================================================================
-
 def generate_standard_plots(sweep_data, param_name, param_unit, model_type,
-                            plots_dir, logx=False):
-    """
-    Generate the standard set of time-series and summary plots for one
-    model type from a parameter sweep.
-    """
-    if not HAS_MATPLOTLIB:
-        print("  Skipping plots (matplotlib not available)")
-        return
-
+                            plots_dir, logx=False, crypt_count=True):
+    """Generate the standard set of time-series and summary plots."""
     setup_style()
     prefix = model_type
 
-    # Time-series plots
     ts_plots = [
         ('num_cells', 'Number of Cells', 'Cell Proliferation Over Time'),
         ('mean_r', 'Mean Radial Distance (CD)', 'Organoid Growth Over Time'),
@@ -1089,7 +789,6 @@ def generate_standard_plots(sweep_data, param_name, param_unit, model_type,
         plot_timeseries_by_param(sweep_data, col, param_name, param_unit,
                                  ylabel, title, path, model_type)
 
-    # Final-value summary plots
     summary_plots = [
         ('num_cells', 'Final Cell Count', 'Final Cell Count vs ' + param_name),
         ('mean_r', 'Final Mean Radius (CD)', 'Final Organoid Size vs ' + param_name),
@@ -1098,21 +797,17 @@ def generate_standard_plots(sweep_data, param_name, param_unit, model_type,
     ]
 
     for col, ylabel, title in summary_plots:
-        # Box plot
         path = os.path.join(plots_dir, f'{prefix}_{col}_boxplot.png')
         plot_final_value_boxplot(sweep_data, col, param_name, param_unit,
                                 ylabel, title, path, model_type)
-        # Mean ± SD
         path = os.path.join(plots_dir, f'{prefix}_{col}_vs_{param_name}.png')
         plot_mean_vs_param(sweep_data, col, param_name, param_unit,
                            ylabel, title, path, model_type, logx=logx)
 
-    # Crypt count and circularity time-series (2D models only)
-    if HAS_CRYPT_COUNT and model_type in ('node2d', 'vertex2d'):
+    if crypt_count and _crypt_count_mod and model_type in ('node2d', 'vertex2d'):
         print(f"  Computing crypt count timeseries for {model_type}...")
         enrich_sweep_with_crypt_counts(sweep_data, model_type)
 
-        # Check if any data was added
         has_cc = any(
             'num_crypts' in d
             for runs in sweep_data.values()
@@ -1120,43 +815,44 @@ def generate_standard_plots(sweep_data, param_name, param_unit, model_type,
         )
         if has_cc:
             for col, ylabel, title in [
-                ('num_crypts', 'Number of Crypts',
-                 'Crypt Count Over Time'),
-                ('circularity', 'Circularity',
-                 'Circularity Over Time'),
+                ('circularity', 'Circularity', 'Circularity Over Time'),
             ]:
-                path = os.path.join(plots_dir,
-                                    f'{prefix}_{col}_timeseries.png')
-                plot_timeseries_by_param(sweep_data, col,
-                                         param_name, param_unit,
+                path = os.path.join(plots_dir, f'{prefix}_{col}_timeseries.png')
+                plot_timeseries_by_param(sweep_data, col, param_name, param_unit,
                                          ylabel, title, path, model_type,
                                          time_col='_cc_time')
 
-            # Final-value plots for crypt count and circularity
             for col, ylabel, title in [
-                ('num_crypts', 'Final Crypt Count',
-                 'Final Crypt Count vs ' + param_name),
-                ('circularity', 'Final Circularity',
-                 'Final Circularity vs ' + param_name),
+                ('circularity', 'Final Circularity', 'Final Circularity vs ' + param_name),
             ]:
-                path = os.path.join(plots_dir,
-                                    f'{prefix}_{col}_boxplot.png')
-                plot_final_value_boxplot(sweep_data, col,
-                                         param_name, param_unit,
+                path = os.path.join(plots_dir, f'{prefix}_{col}_boxplot.png')
+                plot_final_value_boxplot(sweep_data, col, param_name, param_unit,
                                          ylabel, title, path, model_type)
-                path = os.path.join(plots_dir,
-                                    f'{prefix}_{col}_vs_{param_name}.png')
-                plot_mean_vs_param(sweep_data, col,
-                                    param_name, param_unit,
-                                    ylabel, title, path, model_type,
-                                    logx=logx)
+                path = os.path.join(plots_dir, f'{prefix}_{col}_vs_{param_name}.png')
+                plot_mean_vs_param(sweep_data, col, param_name, param_unit,
+                                    ylabel, title, path, model_type, logx=logx)
 
-            # Save crypt count timeseries CSV
-            cc_csv = os.path.join(plots_dir,
-                                  f'{prefix}_crypt_count_timeseries.csv')
+            for col, ylabel, title in [
+                ('num_crypts', 'Number of Crypts', 'Crypt Count Over Time'),
+            ]:
+                path = os.path.join(plots_dir, f'{prefix}_{col}_timeseries.png')
+                plot_timeseries_by_param(sweep_data, col, param_name, param_unit,
+                                         ylabel, title, path, model_type,
+                                         time_col='_cc_time')
+
+            for col, ylabel, title in [
+                ('num_crypts', 'Final Crypt Count', 'Final Crypt Count vs ' + param_name),
+            ]:
+                path = os.path.join(plots_dir, f'{prefix}_{col}_boxplot.png')
+                plot_final_value_boxplot(sweep_data, col, param_name, param_unit,
+                                         ylabel, title, path, model_type)
+                path = os.path.join(plots_dir, f'{prefix}_{col}_vs_{param_name}.png')
+                plot_mean_vs_param(sweep_data, col, param_name, param_unit,
+                                    ylabel, title, path, model_type, logx=logx)
+
+            cc_csv = os.path.join(plots_dir, f'{prefix}_crypt_count_timeseries.csv')
             save_crypt_count_csv(sweep_data, param_name, cc_csv, model_type)
 
-    # Print and save summary table
     print_summary_table(sweep_data, param_name, model_type)
     csv_path = os.path.join(plots_dir, f'{prefix}_summary.csv')
     save_summary_csv(sweep_data, param_name, csv_path, model_type)
