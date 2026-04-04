@@ -5,7 +5,7 @@
 # Two-phase Slurm submission for BluePebble HPC (ACRC, University of Bristol)
 #
 # Phase 1 (build):  Single job — git pull, cmake, make CryptBuddingApp
-# Phase 2 (run):    Array job — 7 stiffness x 10 replicates = 70 tasks
+# Phase 2 (run):    Array job — 11 shear modulus x 10 replicates = 110 tasks
 #                   Only starts after build succeeds (--dependency=afterok)
 #
 # Supports four model types: node2d, vertex2d, node3d, vertex3d
@@ -39,7 +39,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=4G
 #SBATCH --time=12:00:00
-#SBATCH --array=0-99%100
+#SBATCH --array=0-109%110
 #SBATCH --output=/user/work/%u/logs/ecm_stiffness_sweep/slurm-%A_%a.out
 #SBATCH --error=/user/work/%u/logs/ecm_stiffness_sweep/slurm-%A_%a.err
 
@@ -289,7 +289,7 @@ if [ "${SWEEP_PHASE}" = "analyse" ]; then
         for tag in "${RUN_TAGS[@]}"; do
             SEARCH_DIR="${SIM_OUTPUT_BASE}/${tag}"
             [ -d "${SEARCH_DIR}" ] || continue
-            for sdir in "${SEARCH_DIR}"/s*_r*/CryptBudding/*/"${model}"/stiffness_*; do
+            for sdir in "${SEARCH_DIR}"/g*_r*/CryptBudding/*/"${model}"/G_*Pa; do
                 [ -d "${sdir}" ] || continue
                 stiff=$(basename "${sdir}")
                 mkdir -p "${MERGED_MODEL}/${stiff}"
@@ -348,21 +348,22 @@ fi
 # PHASE: RUN  (array job — one task per (stiffness, replicate) combo)
 # #############################################################################
 
-# ---------- Stiffness sweep parameters ----------
-STIFFNESS_VALUES=(0.5 1.0 2.0 5.0 10.0 20.0 35.0 50.0 70.0 100.0)
-NUM_STIFFNESS=${#STIFFNESS_VALUES[@]}
+# ---------- Shear modulus sweep parameters ----------
+# ECM shear modulus in Pa: 100 to 2100 in 200 Pa steps (11 values)
+SHEAR_MODULUS_VALUES=(100 300 500 700 900 1100 1300 1500 1700 1900 2100)
+NUM_SHEAR_MODULUS=${#SHEAR_MODULUS_VALUES[@]}
 NUM_REPLICATES=10
 
-# Decode array task ID → (stiffness_index, replicate)
-STIFFNESS_INDEX=$((SLURM_ARRAY_TASK_ID / NUM_REPLICATES))
+# Decode array task ID → (shear_modulus_index, replicate)
+SHEAR_MODULUS_INDEX=$((SLURM_ARRAY_TASK_ID / NUM_REPLICATES))
 RUN_NUMBER=$((SLURM_ARRAY_TASK_ID % NUM_REPLICATES))
 
-if [ "$STIFFNESS_INDEX" -ge "$NUM_STIFFNESS" ]; then
+if [ "$SHEAR_MODULUS_INDEX" -ge "$NUM_SHEAR_MODULUS" ]; then
     echo "Array task $SLURM_ARRAY_TASK_ID exceeds parameter space. Exiting."
     exit 0
 fi
 
-ECM_STIFFNESS=${STIFFNESS_VALUES[$STIFFNESS_INDEX]}
+ECM_SHEAR_MODULUS=${SHEAR_MODULUS_VALUES[$SHEAR_MODULUS_INDEX]}
 
 # ---------- Dynamic job name ----------
 case "$MODEL_TYPE" in
@@ -371,7 +372,7 @@ case "$MODEL_TYPE" in
     node3d)   JOB_PREFIX="N3" ;;
     vertex3d) JOB_PREFIX="V3" ;;
 esac
-JOB_NAME="${JOB_PREFIX}S${ECM_STIFFNESS}R${RUN_NUMBER}"
+JOB_NAME="${JOB_PREFIX}G${ECM_SHEAR_MODULUS}R${RUN_NUMBER}"
 scontrol update JobId="${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}" JobName="${JOB_NAME}"
 
 # ---------- Paths ----------
@@ -379,11 +380,11 @@ scontrol update JobId="${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}" JobName="${
 RUN_TAG="${SLURM_ARRAY_JOB_ID}_${MODEL_TYPE}_${SWEEP_TIMESTAMP}"
 LOG_DIR="${BASE_LOG_DIR}/${RUN_TAG}"
 OUTPUT_BASE="/user/work/$(whoami)/sim_output/${RUN_TAG}"
-OUTPUT_DIR="${OUTPUT_BASE}/s${ECM_STIFFNESS}_r${RUN_NUMBER}"
+OUTPUT_DIR="${OUTPUT_BASE}/g${ECM_SHEAR_MODULUS}_r${RUN_NUMBER}"
 
 mkdir -p "${OUTPUT_DIR}" "${LOG_DIR}"
 
-LOG_FILE="${LOG_DIR}/s${ECM_STIFFNESS}_r${RUN_NUMBER}.log"
+LOG_FILE="${LOG_DIR}/g${ECM_SHEAR_MODULUS}_r${RUN_NUMBER}.log"
 exec > >(tee -a "${LOG_FILE}")
 exec 2>&1
 
@@ -409,7 +410,7 @@ echo "============================================"
 echo "  Job ID:          ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 echo "  Model:           ${MODEL_TYPE}"
 echo "  Config file:     ${CONFIG_FILENAME}"
-echo "  ECM Stiffness:   ${ECM_STIFFNESS}"
+echo "  Shear Modulus:   ${ECM_SHEAR_MODULUS} Pa"
 echo "  Replicate:       ${RUN_NUMBER}"
 echo "  Node:            $(hostname)"
 echo "  Start Time:      $(date)"
@@ -429,7 +430,7 @@ fi
 
 # ---------- Run simulation ----------
 echo ""
-echo "Running CryptBuddingApp (config=${CONFIG_FILENAME}, stiffness=${ECM_STIFFNESS}, run=${RUN_NUMBER})..."
+echo "Running CryptBuddingApp (config=${CONFIG_FILENAME}, shear_modulus=${ECM_SHEAR_MODULUS}Pa, run=${RUN_NUMBER})..."
 
 apptainer exec \
     --bind "${BUILD_DIR}:/home/chaste/build" \
@@ -440,7 +441,7 @@ apptainer exec \
     "${SIF_IMAGE}" \
     "${APP_PATH}" \
         -config "${CONTAINER_CONFIG_PATH}" \
-        -stiffness "${ECM_STIFFNESS}" \
+        -shear-modulus "${ECM_SHEAR_MODULUS}" \
         -run "${RUN_NUMBER}"
 
 EXIT_CODE=$?
@@ -448,7 +449,7 @@ EXIT_CODE=$?
 # ---------- Archive output ----------
 ARCHIVE_DIR="${OUTPUT_BASE}/archives"
 mkdir -p "${ARCHIVE_DIR}"
-ARCHIVE_NAME="s${ECM_STIFFNESS}_r${RUN_NUMBER}.tar.gz"
+ARCHIVE_NAME="g${ECM_SHEAR_MODULUS}_r${RUN_NUMBER}.tar.gz"
 ARCHIVE_PATH="${ARCHIVE_DIR}/${ARCHIVE_NAME}"
 
 if [ -d "${OUTPUT_DIR}" ] && [ "$(ls -A ${OUTPUT_DIR})" ]; then
@@ -463,7 +464,7 @@ echo "  Job Complete"
 echo "  Exit Code:       ${EXIT_CODE}"
 echo "  End Time:        $(date)"
 echo "  Model:           ${MODEL_TYPE}"
-echo "  ECM Stiffness:   ${ECM_STIFFNESS}"
+echo "  Shear Modulus:   ${ECM_SHEAR_MODULUS} Pa"
 echo "  Replicate:       ${RUN_NUMBER}"
 echo "  Output:          ${OUTPUT_DIR}"
 echo "  Archive:         ${ARCHIVE_PATH}"
