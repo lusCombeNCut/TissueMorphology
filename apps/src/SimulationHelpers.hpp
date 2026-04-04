@@ -74,7 +74,7 @@ void WireCommonModifiers(OffLatticeSimulation<DIM>& rSimulator,
     rSimulator.AddSimulationModifier(p_vol);
 
     boost::shared_ptr<CryptBuddingSummaryModifier<DIM>> p_summary(
-        new CryptBuddingSummaryModifier<DIM>(p.ecmStiffness, p.samplingMultiple,
+        new CryptBuddingSummaryModifier<DIM>(p.GetPrimaryEcmParam(), p.samplingMultiple,
                                               totalSimTime));
     rSimulator.AddSimulationModifier(p_summary);
 

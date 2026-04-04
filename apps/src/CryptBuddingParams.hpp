@@ -34,7 +34,7 @@
 struct CryptBuddingParams
 {
     std::string modelType;
-    double ecmStiffness;
+    double cellGhostSpringStiffness;
     unsigned runNumber;
     unsigned randomSeed;
     int verbosity;  // 0=quiet, 1=normal, 2=verbose
@@ -59,7 +59,8 @@ struct CryptBuddingParams
     double cellDiameterMicrometers;             // Cell diameter in µm (default 10 µm)
     double referenceForcenN;                    // Typical traction force in nN (default 10 nN)
     double referenceVelocityUmPerH;             // Typical migration speed in µm/h (default 10 µm/h)
-    double ecmElasticModulusPa;                 // ECM elastic modulus in Pa (optional; overrides ecmStiffness if > 0)
+    double ecmElasticModulusPa;                 // ECM elastic modulus in Pa (optional; overrides cellGhostSpringStiffness if > 0)
+    double ecmShearModulusPa;                   // ECM shear modulus in Pa (optional; derives E0, E1 via SLS formula if > 0)
 
     bool enableLumenPressure;
     bool enableApicalConstriction;
@@ -164,8 +165,8 @@ struct CryptBuddingParams
 
     // Viscoelastic constitutive model (generalised Maxwell: E(t) = E0 + E1*exp(-t/tau))
     bool enableViscoelasticECM;             // Use viscoelastic ghost node ECM instead of elastic
-    double ghostRelaxedStiffness;           // Long-time (relaxed) modulus E0
-    double ghostRelaxationModulus;          // Transient modulus E1
+    double ghostE0;                         // Long-time (relaxed) modulus E0
+    double ghostE1;                         // Transient modulus E1
     double ghostRelaxationTime;             // Relaxation time tau (hours)
 
     // Dynamic ghost node boundary expansion
@@ -266,18 +267,18 @@ struct CryptBuddingParams
 
         if (usePhysicalUnits)
         {
-            // If elastic modulus is specified, derive ecmStiffness in physical N/m first:
+            // If elastic modulus is specified, derive cellGhostSpringStiffness in physical N/m first:
             //   k_phys [N/m] = E [Pa] × L0 [m]
             // Then the common /kF below converts it to sim units.
             if (ecmElasticModulusPa > 0.0)
-                ecmStiffness = ecmElasticModulusPa * L0;
+                cellGhostSpringStiffness = ecmElasticModulusPa * L0;
 
             // Convert physical → sim (divide by factor)
-            ecmStiffness             /= kF;
+            cellGhostSpringStiffness /= kF;
             springStiffness          /= kF;
             bendingStiffness         /= bF;
-            ghostRelaxedStiffness    /= kF;
-            ghostRelaxationModulus   /= kF;
+            ghostE0                  /= kF;
+            ghostE1                  /= kF;
             gammaApical              /= kF;
             gammaBasal               /= kF;
             gammaLateral             /= kF;
@@ -351,12 +352,15 @@ struct CryptBuddingParams
         if (ecmElasticModulusPa > 0.0)
             std::cout << "  " << std::left << std::setw(34) << "ecmElasticModulusPa (input)"
                       << "  " << std::scientific << std::setprecision(4) << ecmElasticModulusPa << "  Pa\n";
+        if (ecmShearModulusPa > 0.0)
+            std::cout << "  " << std::left << std::setw(34) << "ecmShearModulusPa (input)"
+                      << "  " << std::scientific << std::setprecision(4) << ecmShearModulusPa << "  Pa\n";
 
-        row("ecmStiffness",              ecmStiffness,              "N/m",  ecmStiffness * kF);
+        row("cellGhostSpringStiffness",  cellGhostSpringStiffness,  "N/m",  cellGhostSpringStiffness * kF);
         row("springStiffness",           springStiffness,           "N/m",  springStiffness * kF);
         row("bendingStiffness",          bendingStiffness,          "N·m",  bendingStiffness * bF);
-        row("ghostRelaxedStiffness",     ghostRelaxedStiffness,     "N/m",  ghostRelaxedStiffness * kF);
-        row("ghostRelaxationModulus",    ghostRelaxationModulus,    "N/m",  ghostRelaxationModulus * kF);
+        row("ghostE0",                   ghostE0,                   "N/m",  ghostE0 * kF);
+        row("ghostE1",                   ghostE1,                   "N/m",  ghostE1 * kF);
         row("gammaApical",               gammaApical,               "N/m",  gammaApical * kF);
         row("gammaBasal",                gammaBasal,                "N/m",  gammaBasal * kF);
         row("gammaLateral",              gammaLateral,              "N/m",  gammaLateral * kF);
@@ -396,7 +400,7 @@ struct CryptBuddingParams
     void SetDefaults()
     {
         modelType = "";
-        ecmStiffness = 5.0;
+        cellGhostSpringStiffness = 5.0;
         runNumber = 0;
         verbosity = 1;
 
@@ -405,7 +409,8 @@ struct CryptBuddingParams
         cellDiameterMicrometers    = 10.0;   // Typical mammalian epithelial cell: 10 µm
         referenceForcenN           = 10.0;   // Typical epithelial traction force: ~10 nN
         referenceVelocityUmPerH    = 10.0;   // Typical migration speed: ~10 µm/h (= 1 CD/h)
-        ecmElasticModulusPa        = -1.0;   // Sentinel: disabled (use ecmStiffness directly)
+        ecmElasticModulusPa        = -1.0;   // Sentinel: disabled (use cellGhostSpringStiffness directly)
+        ecmShearModulusPa          = -1.0;   // Sentinel: disabled (set E0, E1 directly)
 
         enableLumenPressure = true;
         enableApicalConstriction = true;
@@ -505,14 +510,14 @@ struct CryptBuddingParams
         ghostAnisotropyStrength     = 0.5;
         ghostCellGhostRestLength    = 1.0;
         ghostCellGhostCutoff        = 1.5;
-        ghostSpringRestLength       = -1.0;  // sentinel: auto-derive from grid spacing
-        ghostGridSpacing            = -1.0;  // sentinel: defaults to ghostSpringRestLength (or ecmGridSpacing if rest length also unset)
+        ghostSpringRestLength       = 1.0;   // ECM-ECM spring rest length (1 CD)
+        ghostGridSpacing            = 1.0;   // Ghost node grid spacing — always 1 CD
         ghostRemovalCheckInterval   = 10;
 
         // Viscoelastic ECM (generalised Maxwell model)
         enableViscoelasticECM       = true;
-        ghostRelaxedStiffness       = 5.0;    // E0: long-time modulus
-        ghostRelaxationModulus      = 1.0;    // E1: transient modulus
+        ghostE0                     = 5.0;    // E0: long-time modulus
+        ghostE1                     = 1.0;    // E1: transient modulus
         ghostRelaxationTime         = 1.0;    // tau: relaxation time (hours)
 
         // Dynamic ghost node boundary expansion
@@ -559,20 +564,21 @@ struct CryptBuddingParams
 
     void Finalise()
     {
-        randomSeed = static_cast<unsigned>(ecmStiffness * 10000) + runNumber * 137;
+        double seedParam = (ecmShearModulusPa > 0.0) ? ecmShearModulusPa : cellGhostSpringStiffness;
+        randomSeed = static_cast<unsigned>(seedParam * 10000) + runNumber * 137;
 
         // Derive organoidRadius2d from numCells so spacing = rest length (1.0)
         // spacing = 2πR / N = 1.0  →  R = N / (2π)
         organoidRadius2d = numCells2dNode / (2.0 * M_PI);
 
-        // Derive vertex-2D annulus radii so each wedge cell has area ≈ 1.0
-        // Mid-radius matches node spacing: R_mid = N / (2π)
-        // Ring width w = 2πR_mid / N = 1.0 (square aspect ratio)
+        // Derive vertex-2D annulus radii so each wedge cell has area = 1.0 CD² exactly.
+        // Each cell is a straight-edged trapezium; area = R_mid * sin(2π/N) with w=1.
+        // Setting A=1 gives R_mid = 1/sin(2π/N), w = 1 (radial width = 1 CD).
         {
-            double R_mid = numCells2dVertex / (2.0 * M_PI);
-            double w = 2.0 * M_PI * R_mid / numCells2dVertex;  // = 1.0
-            innerRadius2d = R_mid - 0.5 * w;
-            outerRadius2d = R_mid + 0.5 * w;
+            double dtheta = 2.0 * M_PI / numCells2dVertex;
+            double R_mid = 1.0 / std::sin(dtheta);
+            innerRadius2d = R_mid - 0.5;
+            outerRadius2d = R_mid + 0.5;
         }
 
         // For vertex2d, organoidRadius2d must match the actual mesh size,
@@ -586,8 +592,8 @@ struct CryptBuddingParams
         // 4πR² / N = 1.0  →  R = √(N / 4π)
         organoidRadius3d = std::sqrt(numCells3dNode / (4.0 * M_PI));
 
-        bmStiffnessNode   = ecmStiffness;
-        bmStiffnessVertex = ecmStiffness * 0.5;
+        bmStiffnessNode   = cellGhostSpringStiffness;
+        bmStiffnessVertex = cellGhostSpringStiffness * 0.5;
 
         // Note: ecmDegradationRate and ecmDiffusionCoeff are loaded from config file
         // Only set defaults if not already set (SetDefaults handles this)
@@ -613,6 +619,39 @@ struct CryptBuddingParams
         if (ghostGridSpacing < 0.0)
         {
             ghostGridSpacing = (ghostSpringRestLength > 0.0) ? ghostSpringRestLength : ecmGridSpacing;
+        }
+
+        // ── Shear modulus → SLS stiffness derivation ─────────────────
+        // When ecmShearModulusPa is set, derive ghostE0 and ghostE1 from
+        // the shear modulus using the formula
+        // from visco_unit_convert.py (Fertala et al., 2025):
+        //   E0 = G * 2.9 * Δx / r,   E1 = r * E0
+        // where r = E1/E0 = 0.05 (SLS arm ratio) and Δx = ghost spacing (physical).
+        if (ecmShearModulusPa > 0.0)
+        {
+            const double SLS_ARM_RATIO = 0.05;       // E1/E0 from Fertala et al. (2025)
+            const double GEOMETRIC_FACTOR = 2.9;     // shear modulus → 1D spring constant
+            const double L0_m = cellDiameterMicrometers * 1e-6;
+            const double T0 = 3600.0;
+            const double ghostSpacingPhys = L0_m * ghostGridSpacing;  // physical ghost spacing
+
+            double E0_phys = ecmShearModulusPa * GEOMETRIC_FACTOR * ghostSpacingPhys / SLS_ARM_RATIO;
+            double E1_phys = SLS_ARM_RATIO * E0_phys;
+
+            // Convert physical N/m → sim units via kF = η_phys / T0
+            const double f_ref_N  = referenceForcenN * 1e-9;
+            const double v_ref_ms = (referenceVelocityUmPerH * 1e-6) / T0;
+            const double kF = (f_ref_N / v_ref_ms) / T0;
+
+            ghostE0  = E0_phys / kF;
+            ghostE1  = E1_phys / kF;
+
+            std::cout << "  Shear modulus: G=" << ecmShearModulusPa << " Pa"
+                      << " \u2192 E0=" << std::scientific << std::setprecision(3) << E0_phys << " N/m"
+                      << " (sim=" << std::fixed << std::setprecision(2) << ghostE0 << ")"
+                      << ", E1=" << std::scientific << std::setprecision(3) << E1_phys << " N/m"
+                      << " (sim=" << std::fixed << std::setprecision(2) << ghostE1 << ")"
+                      << std::endl;
         }
 
         if (modelType == "node2d")
@@ -708,12 +747,35 @@ struct CryptBuddingParams
                       + std::to_string(numCells3dNode) + ")");
 
         // ── Stiffness/force parameters should be non-negative ────────
-        if (ecmStiffness < 0.0)
-            EXCEPTION("ecmStiffness must be >= 0 (got " + std::to_string(ecmStiffness) + ")");
+        if (cellGhostSpringStiffness < 0.0)
+            EXCEPTION("cellGhostSpringStiffness must be >= 0 (got " + std::to_string(cellGhostSpringStiffness) + ")");
         if (springStiffness < 0.0)
             EXCEPTION("springStiffness must be >= 0 (got " + std::to_string(springStiffness) + ")");
 
         std::cout << "Parameter validation passed." << std::endl;
+    }
+
+    /**
+     * Generate a descriptive ECM label for output directories.
+     * Uses shear modulus (Pa) if set, otherwise ghostE0.
+     */
+    std::string GetEcmLabel() const
+    {
+        std::stringstream ss;
+        if (ecmShearModulusPa > 0.0)
+            ss << "G_" << std::fixed << std::setprecision(0) << ecmShearModulusPa << "Pa";
+        else
+            ss << "E0_" << std::fixed << std::setprecision(1) << ghostE0;
+        return ss.str();
+    }
+
+    /**
+     * Return the primary ECM characterisation parameter value.
+     * Shear modulus (Pa) if set, otherwise ghostE0 (sim units).
+     */
+    double GetPrimaryEcmParam() const
+    {
+        return (ecmShearModulusPa > 0.0) ? ecmShearModulusPa : ghostE0;
     }
 
     /**
@@ -804,7 +866,7 @@ private:
 
         // ── Simulation ───────────────────────────────────────────────
         getString("modelType", modelType);
-        getDouble("ecmStiffness", ecmStiffness);
+        getDouble("cellGhostSpringStiffness", cellGhostSpringStiffness);
         getUnsigned("runNumber", runNumber);
         getUnsigned("randomSeed", randomSeed);
 
@@ -921,8 +983,8 @@ private:
         getUnsigned("ghostRemovalCheckInterval", ghostRemovalCheckInterval);
 
         // ── Viscoelastic ECM ─────────────────────────────────────────
-        getDouble("ghostRelaxedStiffness", ghostRelaxedStiffness);
-        getDouble("ghostRelaxationModulus", ghostRelaxationModulus);
+        getDouble("ghostE0", ghostE0);
+        getDouble("ghostE1", ghostE1);
         getDouble("ghostRelaxationTime", ghostRelaxationTime);
 
         // ── Vertex mesh thresholds ───────────────────────────────────
@@ -1172,11 +1234,11 @@ public:
         file << "enableContinuousPvd = " << (enableContinuousPvd ? "true" : "false") << "  # Keep .pvd files valid during simulation\n\n";
 
         file << "[ECM]\n";
-        file << "ecmStiffness = " << ecmStiffness << "  # ECM spring stiffness (on-lattice: cell-ECM; off-lattice: ECM-ECM node)\n";
+        file << "cellGhostSpringStiffness = " << cellGhostSpringStiffness << "  # Cell-ghost spring stiffness (also used for grid ECM confinement)\n";
         file << "ecmSpringRestLength = " << ecmSpringRestLength << "  # Rest length for cell-ECM springs\n";
         file << "ecmInteractionCutoff = " << ecmInteractionCutoff << "  # Cutoff distance for cell-ECM interactions\n";
-        file << "bmStiffnessNode = " << bmStiffnessNode << "  # 3D only: BasementMembraneForce stiffness (derived from ecmStiffness)\n";
-        file << "bmStiffnessVertex = " << bmStiffnessVertex << "  # 3D only: BasementMembraneForce stiffness (= ecmStiffness × 0.5)\n";
+        file << "bmStiffnessNode = " << bmStiffnessNode << "  # 3D only: BasementMembraneForce stiffness (derived from cellGhostSpringStiffness)\n";
+        file << "bmStiffnessVertex = " << bmStiffnessVertex << "  # 3D only: BasementMembraneForce stiffness (= cellGhostSpringStiffness × 0.5)\n";
         file << "bmOffset3dVertex = " << bmOffset3dVertex << "\n";
         file << "ecmDegradationRate = " << ecmDegradationRate << "\n";
         file << "ecmDiffusionCoeff = " << ecmDiffusionCoeff << "  # Density smoothing coefficient\n\n";
@@ -1298,8 +1360,8 @@ public:
         file << "ghostRemovalCheckInterval = " << ghostRemovalCheckInterval << "   # Steps between removal checks\n";
         file << "# Viscoelastic constitutive model (generalised Maxwell)\n";
         file << "enableViscoelasticECM = " << (enableViscoelasticECM ? "true" : "false") << "  # Use viscoelastic ghost node ECM\n";
-        file << "ghostRelaxedStiffness = " << ghostRelaxedStiffness << "       # E0: relaxed modulus\n";
-        file << "ghostRelaxationModulus = " << ghostRelaxationModulus << "      # E1: transient modulus\n";
+        file << "ghostE0 = " << ghostE0 << "       # E0: relaxed modulus\n";
+        file << "ghostE1 = " << ghostE1 << "      # E1: transient modulus\n";
         file << "ghostRelaxationTime = " << ghostRelaxationTime << "          # tau: relaxation time (hours)\n";
         file << "enableGhostBoundaryExpansion = " << (enableGhostBoundaryExpansion ? "true" : "false") << "  # Dynamically expand ghost domain when cells approach boundary\n";
 
@@ -1411,7 +1473,7 @@ public:
         f << "    \"ECMConfinementForce\": {\n";
         if (ecmElasticModulusPa > 0.0)
             f << "      \"ecmElasticModulusPa\": " << ecmElasticModulusPa << ",\n";
-        f << "      \"ecmStiffness\": " << ecmStiffness << ",\n";
+        f << "      \"cellGhostSpringStiffness\": " << cellGhostSpringStiffness << ",\n";
         f << "      \"ecmSpringRestLength\": " << ecmSpringRestLength << ",\n";
         f << "      \"ecmInteractionCutoff\": " << ecmInteractionCutoff << ",\n";
         f << "      \"bmRadiusFraction\": " << bmRadiusFraction << ",\n";
@@ -1438,8 +1500,10 @@ public:
         f << "      \"ghostGridSpacing\": " << ghostGridSpacing << ",\n";
         f << "      \"ghostRemovalCheckInterval\": " << ghostRemovalCheckInterval << ",\n";
         f << "      \"ViscoelasticECM\": {\n";
-        f << "        \"ghostRelaxedStiffness\": " << ghostRelaxedStiffness << ",\n";
-        f << "        \"ghostRelaxationModulus\": " << ghostRelaxationModulus << ",\n";
+        if (ecmShearModulusPa > 0.0)
+            f << "        \"ecmShearModulusPa\": " << ecmShearModulusPa << ",\n";
+        f << "        \"ghostE0\": " << ghostE0 << ",\n";
+        f << "        \"ghostE1\": " << ghostE1 << ",\n";
         f << "        \"ghostRelaxationTime\": " << ghostRelaxationTime << "\n";
         f << "      }\n";
         f << "    },\n";

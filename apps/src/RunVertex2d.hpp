@@ -71,7 +71,7 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
     }
 
     double dtheta = 2.0 * M_PI / static_cast<double>(p.numCells2dVertex);
-    double target_area = 0.5 * dtheta
+    double target_area = 0.5 * std::sin(dtheta)
         * (p.outerRadius2d * p.outerRadius2d - p.innerRadius2d * p.innerRadius2d);
 
     std::vector<CellPtr> cells;
@@ -132,7 +132,7 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
 
     auto p_nh = boost::make_shared<FastNagaiHondaForce<2>>();
     // Note: Deformation energy should be ~100 (Nagai-Honda default) for area stability.
-    // ecmStiffness is used for ECM field stiffness, not the vertex deformation energy.
+    // cellGhostSpringStiffness is used for ECM field stiffness, not the vertex deformation energy.
     p_nh->SetDeformationEnergyParameter(100.0);
     p_nh->SetMembraneSurfaceEnergyParameter(p.nhMembraneSurface);
     if (p.enableDifferentialAdhesion)
@@ -169,7 +169,7 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
         {
             // ── Viscoelastic constitutive model ──────────────────
             boost::shared_ptr<ViscoelasticGhostNodeEcmField<2>> p_ve_field(
-                new ViscoelasticGhostNodeEcmField<2>("radial", gn_spacing, -ecm_half, ecm_half, -ecm_half, ecm_half,
+                new ViscoelasticGhostNodeEcmField<2>("random", gn_spacing, -ecm_half, ecm_half, -ecm_half, ecm_half,
                                      p.ecmGridType));
             ConfigureViscoelasticField(p_ve_field, p);
 
@@ -191,7 +191,7 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
         {
             // ── Original elastic ghost node ECM ──────────────────
             boost::shared_ptr<GhostNodeEcmField<2>> p_ghost_field(
-                new GhostNodeEcmField<2>("radial", gn_spacing, -ecm_half, ecm_half, -ecm_half, ecm_half,
+                new GhostNodeEcmField<2>("random", gn_spacing, -ecm_half, ecm_half, -ecm_half, ecm_half,
                                      p.ecmGridType));
             ConfigureGhostField(p_ghost_field, p, gn_rest);
 
@@ -214,7 +214,7 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
     {
         // ── Grid-based ECM (original) ────────────────────────────
         boost::shared_ptr<DynamicECMField> p_ecm_field(
-            new DynamicECMField("radial", p.ecmGridSpacing,
+            new DynamicECMField("random", p.ecmGridSpacing,
                                -ecm_half, ecm_half, -ecm_half, ecm_half,
                                p.ecmGridType));
         p_ecm_field->SetDegradationRate(p.ecmDegradationRate);

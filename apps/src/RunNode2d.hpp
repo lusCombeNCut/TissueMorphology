@@ -210,7 +210,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
         {
             // ── Viscoelastic constitutive model ──────────────────
             boost::shared_ptr<ViscoelasticGhostNodeEcmField<2>> p_ve_field(
-                new ViscoelasticGhostNodeEcmField<2>("radial", gn_spacing, -ecm_half, ecm_half, -ecm_half, ecm_half,
+                new ViscoelasticGhostNodeEcmField<2>("random", gn_spacing, -ecm_half, ecm_half, -ecm_half, ecm_half,
                                       p.ecmGridType));
             ConfigureViscoelasticField(p_ve_field, p);
 
@@ -232,7 +232,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
         {
             // ── Original elastic ghost node ECM ──────────────────
             boost::shared_ptr<GhostNodeEcmField<2>> p_ghost_field(
-                new GhostNodeEcmField<2>("radial", gn_spacing, -ecm_half, ecm_half, -ecm_half, ecm_half,
+                new GhostNodeEcmField<2>("random", gn_spacing, -ecm_half, ecm_half, -ecm_half, ecm_half,
                                       p.ecmGridType));
             ConfigureGhostField(p_ghost_field, p, gn_rest);
 
@@ -255,7 +255,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
     {
         // ── Grid-based ECM (original) ────────────────────────────
         boost::shared_ptr<DynamicECMField> p_ecm_field(
-            new DynamicECMField("radial", p.ecmGridSpacing,
+            new DynamicECMField("random", p.ecmGridSpacing,
                                -ecm_half, ecm_half, -ecm_half, ecm_half,
                                p.ecmGridType));
         p_ecm_field->SetDegradationRate(p.ecmDegradationRate);

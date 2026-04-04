@@ -24,7 +24,7 @@ template<unsigned DIM>
 void ConfigureGhostField(boost::shared_ptr<GhostNodeEcmField<DIM>> pField,
                           const CryptBuddingParams& p, double gnRest)
 {
-    pField->SetGhostGhostStiffness(p.ecmStiffness);
+    pField->SetGhostGhostStiffness(p.cellGhostSpringStiffness);
     pField->SetGhostDamping(p.ghostDamping);
     pField->SetDegradationRate(p.ecmDegradationRate);
     pField->SetRemovalThreshold(p.ghostRemovalThreshold);
@@ -43,7 +43,7 @@ void ConfigureGhostForce(boost::shared_ptr<GhostNodeEcmForce<DIM>> pForce,
                           const CryptBuddingParams& p)
 {
     pForce->SetGhostField(pField);
-    pForce->SetCellGhostStiffness(p.ecmStiffness);
+    pForce->SetCellGhostStiffness(p.cellGhostSpringStiffness);
     pForce->SetCellGhostRestLength(p.ghostCellGhostRestLength);
     pForce->SetCellGhostCutoff(p.ghostCellGhostCutoff);
     pForce->SetDegradationEnabled(true);
@@ -61,8 +61,8 @@ template<unsigned DIM>
 void ConfigureViscoelasticField(boost::shared_ptr<ViscoelasticGhostNodeEcmField<DIM>> pField,
                                  const CryptBuddingParams& p)
 {
-    pField->SetRelaxedStiffness(p.ghostRelaxedStiffness);
-    pField->SetRelaxationModulus(p.ghostRelaxationModulus);
+    pField->SetRelaxedStiffness(p.ghostE0);
+    pField->SetRelaxationModulus(p.ghostE1);
     pField->SetRelaxationTime(p.ghostRelaxationTime);
     pField->SetGhostDamping(p.ghostDamping);
     pField->SetDegradationRate(p.ecmDegradationRate);
@@ -81,7 +81,7 @@ void ConfigureViscoelasticForce(boost::shared_ptr<ViscoelasticGhostNodeEcmForce<
                                  const CryptBuddingParams& p)
 {
     pForce->SetGhostField(pField);
-    pForce->SetCellGhostStiffness(p.ecmStiffness);
+    pForce->SetCellGhostStiffness(p.cellGhostSpringStiffness);
     pForce->SetCellGhostRestLength(p.ghostCellGhostRestLength);
     pForce->SetCellGhostCutoff(p.ghostCellGhostCutoff);
     pForce->SetDegradationEnabled(true);
@@ -100,7 +100,7 @@ inline void ConfigureGridECMForce(boost::shared_ptr<ECMConfinementForce<2>> pFor
                                    const CryptBuddingParams& p)
 {
     pForce->SetECMField(pField);
-    pForce->SetConfinementStiffness(p.ecmStiffness);
+    pForce->SetConfinementStiffness(p.cellGhostSpringStiffness);
     pForce->SetEcmSpringRestLength(p.ecmSpringRestLength);
     pForce->SetEcmInteractionCutoff(p.ecmInteractionCutoff);
     pForce->SetDegradationEnabled(true);

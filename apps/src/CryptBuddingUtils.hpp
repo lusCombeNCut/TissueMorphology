@@ -194,7 +194,9 @@ inline void PrintBanner(const CryptBuddingParams& p)
     if (p.springCutoff <= 1.0)
         std::cout << "  *** WARNING: cutoff <= rest length, no attractive spring force! ***";
     std::cout << "\n";
-    std::cout << "  ECM:      stiffness=" << p.ecmStiffness;
+    std::cout << "  ECM:      " << p.GetEcmLabel()
+              << "  E0=" << p.ghostE0
+              << "  E1=" << p.ghostE1;
     if (p.enableGhostNodeECM)
         std::cout << " (ghost node)";
     std::cout << "\n";
@@ -239,7 +241,8 @@ inline void PrintUsage()
               << "  -config <file.ini>    Load parameters from legacy INI file\n"
               << "  -saveconfig <file>    Save current parameters (.json or .ini) and exit\n"
               << "\nOptions (override config file values):\n"
-              << "  -stiffness <double>   ECM stiffness (default: 5.0)\n"
+              << "  -stiffness <double>   Cell-ghost spring stiffness (default: 5.0)\n"
+              << "  -shear-modulus <double> ECM shear modulus in Pa (derives E0, E1)\n"
               << "  -run <int>            run/replicate number (default: 0)\n"
               << "  -lumen <0|1>          lumen pressure (default: 1)\n"
               << "  -apical <0|1>         apical constriction (default: 1)\n"
@@ -380,7 +383,11 @@ inline CryptBuddingParams ParseArguments(int argc, char* argv[])
         }
         else if (arg == "-stiffness" && i + 1 < argc)
         {
-            p.ecmStiffness = std::stod(argv[++i]);
+            p.cellGhostSpringStiffness = std::stod(argv[++i]);
+        }
+        else if (arg == "-shear-modulus" && i + 1 < argc)
+        {
+            p.ecmShearModulusPa = std::stod(argv[++i]);
         }
         else if (arg == "-run" && i + 1 < argc)
         {

@@ -153,7 +153,7 @@ public:
         if (!mHeaderWritten)
         {
             file.open(filename.c_str());
-            file << "time,num_cells,mean_r,var_r,max_r,min_r,r_range,max_vol,min_vol,stiffness" << std::endl;
+            file << "time,num_cells,mean_r,var_r,max_r,min_r,r_range,max_vol,min_vol,ecm_param" << std::endl;
             mHeaderWritten = true;
         }
         else

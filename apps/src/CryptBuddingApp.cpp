@@ -14,7 +14,7 @@
  *
  * Arguments:
  *   -model <node2d|vertex2d|node3d|vertex3d>   (required)
- *   -stiffness <double>                         ECM stiffness  (default: 5.0)
+ *   -stiffness <double>                         Cell-ghost spring stiffness  (default: 5.0)\n *   -shear-modulus <double>                      ECM shear modulus in Pa (derives E0, E1)
  *   -run <int>                                  run/replicate  (default: 0)
  *   -lumen <0|1>                                lumen pressure (default: 1)
  *   -apical <0|1>                               apical constriction (default: 1)
@@ -85,11 +85,10 @@ int main(int argc, char* argv[])
 #ifndef TM_GIT_HASH
 #define TM_GIT_HASH "unknown"
 #endif
-                 const double output_stiffness = params.ecmStiffness;
             std::stringstream subdir;
             subdir << "CryptBudding/" << TM_GIT_HASH
                    << "/" << params.modelType
-                     << "/stiffness_" << std::fixed << std::setprecision(1) << output_stiffness
+                   << "/" << params.GetEcmLabel()
                    << "/run_" << params.runNumber;
             outputSubdir = subdir.str();
 

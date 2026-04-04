@@ -60,14 +60,17 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
     RandomNumberGenerator* p_gen = RandomNumberGenerator::Instance();
     double golden = (1.0 + sqrt(5.0)) / 2.0;
 
+    double N = static_cast<double>(p.numCells3dNode);
     for (unsigned i = 0; i < p.numCells3dNode; i++)
     {
+        // Montes-Olivas (2019) Fibonacci sphere: equal z-spacing + golden angle azimuth
+        double zi    = (1.0 - 1.0/N) * (1.0 - 2.0*i/(N - 1.0));
+        double ri    = sqrt(1.0 - zi*zi);
         double theta = 2.0 * M_PI * i / golden;
-        double phi = acos(1.0 - 2.0 * (i + 0.5) / p.numCells3dNode);
         double r = p.organoidRadius3d + (p_gen->ranf() - 0.5) * p.shellThickness3d;
-        double x = r * sin(phi) * cos(theta);
-        double y = r * sin(phi) * sin(theta);
-        double z = r * cos(phi);
+        double x = r * ri * cos(theta);
+        double y = r * ri * sin(theta);
+        double z = r * zi;
         nodes.push_back(new Node<3>(i, false, x, y, z));
     }
 
@@ -206,7 +209,7 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
         {
             // ── Viscoelastic constitutive model ──────────────────
             boost::shared_ptr<ViscoelasticGhostNodeEcmField<3>> p_ve_field(
-                new ViscoelasticGhostNodeEcmField<3>("radial", gn_spacing,
+                new ViscoelasticGhostNodeEcmField<3>("random", gn_spacing,
                                      -p.ecmDomainHalf, p.ecmDomainHalf,
                                      -p.ecmDomainHalf, p.ecmDomainHalf,
                                      -p.ecmDomainHalf, p.ecmDomainHalf,
@@ -231,7 +234,7 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
         {
             // ── Original elastic ghost node ECM ──────────────────
             boost::shared_ptr<GhostNodeEcmField<3>> p_ghost_field(
-                new GhostNodeEcmField<3>("radial", gn_spacing,
+                new GhostNodeEcmField<3>("random", gn_spacing,
                                      -p.ecmDomainHalf, p.ecmDomainHalf,
                                      -p.ecmDomainHalf, p.ecmDomainHalf,
                                      -p.ecmDomainHalf, p.ecmDomainHalf,
@@ -260,7 +263,7 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
         if (p.enableEcmConfinement || p.enableEcmGuidance)
         {
             pEcmField.reset(new DynamicECMField3d(
-                "radial", p.ecmGridSpacing,
+                "random", p.ecmGridSpacing,
                 -p.ecmDomainHalf, p.ecmDomainHalf,
                 -p.ecmDomainHalf, p.ecmDomainHalf,
                 -p.ecmDomainHalf, p.ecmDomainHalf));
@@ -277,7 +280,7 @@ void RunNode3d(const CryptBuddingParams& p, const std::string& outputDir)
         {
             auto p_ecm_conf = boost::make_shared<ECMConfinementForce3d>();
             p_ecm_conf->SetECMField(pEcmField);
-            p_ecm_conf->SetConfinementStiffness(p.ecmStiffness);
+            p_ecm_conf->SetConfinementStiffness(p.cellGhostSpringStiffness);
             p_ecm_conf->SetDegradationEnabled(true);
             p_ecm_conf->SetRemodelingEnabled(p.enableEcmGuidance);
             p_ecm_conf->SetTrackCenter(true);
