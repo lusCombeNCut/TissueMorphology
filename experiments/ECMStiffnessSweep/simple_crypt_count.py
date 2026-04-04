@@ -38,7 +38,9 @@ except ImportError:
     print("WARNING: scipy not available. SimpleCryptCount requires scipy.")
 
 # Default parameters (from SimpleCryptCount paper, Table 2 - In silico)
-DEFAULT_PARAMS = {
+# NOTE: These paper values were fitted to in-vitro organoid images with large,
+# well-defined crypts. For Chaste simulations use SIMULATION_PARAMS instead.
+PAPER_PARAMS = {
     'fourier_harmonics': 25,      # Number of Fourier harmonics
     'n_points': 1000,             # Points for reconstructed boundary
     'min_area': 0.0666,           # Minimum normalized crypt area
@@ -46,6 +48,21 @@ DEFAULT_PARAMS = {
     'min_arc_length': 0.1466,     # Minimum normalized arc length
     'circularity_threshold': 0.98 # Skip crypt counting if too circular
 }
+
+# Calibrated parameters for Chaste CryptBudding simulation output.
+# Budding features are smaller relative to total area because the mechanical
+# model produces many small indentations rather than a few large crypt buds.
+SIMULATION_PARAMS = {
+    'fourier_harmonics': 24,
+    'n_points': 1000,
+    'min_area': 0.0068,            # Lower bound: filter curvature noise
+    'max_area': 0.0474,              # Upper bound: generous
+    'min_arc_length': 0.0357,      # Filter very short segments
+    'circularity_threshold': 0.98
+}
+
+# Default to simulation-calibrated parameters
+DEFAULT_PARAMS = SIMULATION_PARAMS.copy()
 
 
 # =====================================================================
@@ -101,10 +118,10 @@ def load_final_outline(data_dir):
     """
     # Find all outline VTP files
     vtp_files = sorted(glob.glob(os.path.join(data_dir, 'outline_*.vtp')))
-    
+
     if not vtp_files:
         raise FileNotFoundError(f"No outline_*.vtp files in {data_dir}")
-    
+
     # Get the one with the largest timestep
     def get_timestep(path):
         basename = os.path.basename(path)
@@ -113,11 +130,39 @@ def load_final_outline(data_dir):
             return int(basename.replace('outline_', '').replace('.vtp', ''))
         except ValueError:
             return -1
-    
+
     vtp_files.sort(key=get_timestep)
     latest_vtp = vtp_files[-1]
-    
+
     return load_outline_from_vtp(latest_vtp)
+
+
+def load_outline_at_time(data_dir, target_time, dt):
+    """
+    Load the outline VTP file closest to the given simulation time.
+
+    Args:
+        data_dir: Path to results_from_time_* directory
+        target_time: Desired simulation time in hours
+        dt: Simulation timestep size (hours)
+
+    Returns:
+        boundary, cell_types (same as load_outline_from_vtp)
+    """
+    vtp_files = sorted(glob.glob(os.path.join(data_dir, 'outline_*.vtp')))
+    if not vtp_files:
+        raise FileNotFoundError(f"No outline_*.vtp files in {data_dir}")
+
+    target_ts = target_time / dt
+
+    def get_timestep(path):
+        try:
+            return int(os.path.basename(path).replace('outline_', '').replace('.vtp', ''))
+        except ValueError:
+            return -1
+
+    best = min(vtp_files, key=lambda p: abs(get_timestep(p) - target_ts))
+    return load_outline_from_vtp(best)
 
 
 # =====================================================================
@@ -397,91 +442,109 @@ def _decode_appended_array(appended_data, offset, expected_count, dtype):
 def _extract_outer_boundary(points, cells):
     """
     Extract the outer boundary from a vertex mesh.
-    
-    An outer boundary edge is one that belongs to only ONE cell.
-    
+
+    Uses directed edges to correctly walk the boundary. Each cell defines its
+    edges as (v_i, v_{i+1}) in winding order. A boundary edge is a directed
+    edge whose reverse does not exist. Walking via directed next-vertex map
+    avoids the wrong-turn problem of undirected greedy walks.
+
+    If directed walking fails (e.g. non-manifold mesh), falls back to angular
+    sorting of boundary vertices around the centroid.
+
     Args:
         points: Nx2 array of vertex positions
         cells: List of cells, each cell is a list of vertex indices
-    
+
     Returns:
         boundary_pts: Ordered boundary points (Mx2)
         boundary_indices: Indices of boundary vertices
     """
     from collections import defaultdict
-    
-    # Count how many times each edge appears
-    edge_count = defaultdict(int)
-    edge_to_cell = {}  # Track which cell each edge belongs to
-    
-    for cell_idx, cell_verts in enumerate(cells):
+
+    # Build directed edge set from cell connectivity
+    directed_edges = set()
+    for cell_verts in cells:
         n = len(cell_verts)
         for i in range(n):
-            v1, v2 = cell_verts[i], cell_verts[(i + 1) % n]
-            # Canonical edge representation (sorted)
-            edge = tuple(sorted([v1, v2]))
-            edge_count[edge] += 1
-            edge_to_cell[edge] = cell_idx
-    
-    # Boundary edges appear exactly once
-    boundary_edges = [edge for edge, count in edge_count.items() if count == 1]
-    
-    if not boundary_edges:
+            v1, v2 = int(cell_verts[i]), int(cell_verts[(i + 1) % n])
+            directed_edges.add((v1, v2))
+
+    # Boundary directed edges: edges whose reverse is absent
+    boundary_directed = []
+    for (v1, v2) in directed_edges:
+        if (v2, v1) not in directed_edges:
+            boundary_directed.append((v1, v2))
+
+    if not boundary_directed:
         raise ValueError("No boundary edges found - mesh may not have an outer boundary")
-    
-    # Order the boundary edges into a continuous loop
-    ordered_verts = _order_boundary_edges(boundary_edges)
-    
-    # Get the boundary points
+
+    # Build next-vertex map for directed boundary walk
+    next_map = defaultdict(list)
+    for v1, v2 in boundary_directed:
+        next_map[v1].append(v2)
+
+    # Walk all boundary loops using directed edges
+    visited_edges = set()
+    loops = []
+
+    for start_v1, start_v2 in boundary_directed:
+        if (start_v1, start_v2) in visited_edges:
+            continue
+
+        loop = [start_v1]
+        current = start_v1
+
+        while True:
+            candidates = next_map.get(current, [])
+            chosen = None
+            for nxt in candidates:
+                if (current, nxt) not in visited_edges:
+                    chosen = nxt
+                    break
+
+            if chosen is None:
+                break
+
+            visited_edges.add((current, chosen))
+            if chosen == loop[0] and len(loop) > 2:
+                break  # Completed loop
+
+            loop.append(chosen)
+            current = chosen
+
+        if len(loop) > 2:
+            loops.append(loop)
+
+    if not loops:
+        # Fallback: angular sort of boundary vertices
+        boundary_verts = _angular_sort_boundary(points, boundary_directed)
+        return points[boundary_verts], boundary_verts
+
+    # Pick the longest loop (outer boundary)
+    longest = max(loops, key=len)
+    ordered_verts = np.array(longest)
     boundary_pts = points[ordered_verts]
-    
+
     return boundary_pts, ordered_verts
 
 
-def _order_boundary_edges(edges):
+def _angular_sort_boundary(points, boundary_directed):
     """
-    Order boundary edges into a continuous loop.
-    
-    Args:
-        edges: List of (v1, v2) tuples
-    
-    Returns:
-        ordered_verts: List of vertex indices in order around the boundary
+    Fallback: sort boundary vertices by angle from centroid.
+    Works for star-shaped (or approximately star-shaped) boundaries.
     """
-    from collections import defaultdict
-    
-    # Build adjacency: for each vertex, which vertices are connected
-    adj = defaultdict(list)
-    for v1, v2 in edges:
-        adj[v1].append(v2)
-        adj[v2].append(v1)
-    
-    # Start from any boundary vertex
-    start = edges[0][0]
-    ordered = [start]
-    visited = {start}
-    
-    current = start
-    while True:
-        # Find next unvisited neighbor
-        found_next = False
-        for neighbor in adj[current]:
-            if neighbor not in visited:
-                ordered.append(neighbor)
-                visited.add(neighbor)
-                current = neighbor
-                found_next = True
-                break
-        
-        if not found_next:
-            # Check if we've completed the loop
-            if start in adj[current] and len(ordered) > 2:
-                break  # Complete loop
-            else:
-                # Dead end - shouldn't happen with valid boundary
-                break
-    
-    return np.array(ordered)
+    boundary_vert_set = set()
+    for v1, v2 in boundary_directed:
+        boundary_vert_set.add(v1)
+        boundary_vert_set.add(v2)
+
+    boundary_verts = np.array(sorted(boundary_vert_set))
+    boundary_pts = points[boundary_verts]
+    centroid = boundary_pts.mean(axis=0)
+    angles = np.arctan2(boundary_pts[:, 1] - centroid[1],
+                        boundary_pts[:, 0] - centroid[0])
+    order = np.argsort(angles)
+    return boundary_verts[order]
 
 
 def _get_boundary_cell_types(boundary_pts, all_points, cells, cell_type_data):
@@ -508,13 +571,15 @@ def _get_boundary_cell_types(boundary_pts, all_points, cells, cell_type_data):
     return boundary_cell_types
 
 
-def load_final_vertex_boundary(data_dir):
+def load_final_vertex_boundary(data_dir, target_time=None, dt=None):
     """
-    Load the final (latest timestep) boundary from a vertex mesh simulation.
-    
+    Load boundary from a vertex mesh simulation.
+
     Args:
         data_dir: Path to results_from_time_* directory
-    
+        target_time: If given, load the VTU closest to this time (hours)
+        dt: Simulation timestep (hours), required if target_time is set
+
     Returns:
         boundary: Ordered boundary points (N x 2)
         cell_types: Cell type at each point (or None)
@@ -522,24 +587,25 @@ def load_final_vertex_boundary(data_dir):
     # Find all results VTU files (not ecm_grid files)
     vtu_files = [f for f in glob.glob(os.path.join(data_dir, 'results_*.vtu'))
                  if 'ecm_grid' not in f]
-    
+
     if not vtu_files:
         raise FileNotFoundError(f"No results_*.vtu files in {data_dir}")
-    
-    # Get the one with the largest timestep
+
     def get_timestep(path):
-        basename = os.path.basename(path)
-        # results_6000.vtu -> 6000
         try:
-            return int(basename.replace('results_', '').replace('.vtu', ''))
+            return int(os.path.basename(path).replace('results_', '').replace('.vtu', ''))
         except ValueError:
             return -1
-    
-    vtu_files.sort(key=get_timestep)
-    latest_vtu = vtu_files[-1]
-    
-    print(f"Loading vertex boundary from: {os.path.basename(latest_vtu)}")
-    return load_boundary_from_vtu(latest_vtu)
+
+    if target_time is not None and dt is not None:
+        target_ts = target_time / dt
+        chosen_vtu = min(vtu_files, key=lambda p: abs(get_timestep(p) - target_ts))
+    else:
+        vtu_files.sort(key=get_timestep)
+        chosen_vtu = vtu_files[-1]
+
+    print(f"Loading vertex boundary from: {os.path.basename(chosen_vtu)}")
+    return load_boundary_from_vtu(chosen_vtu)
 
 
 # =====================================================================
@@ -846,6 +912,77 @@ def fourier_reconstruct(boundary, n_harmonics=25, n_points=1000, normalize=True)
     output += boundary.mean(axis=0) - output.mean(axis=0)
     
     return output
+
+
+def direct_fourier_reconstruct(boundary, n_harmonics=25, n_points=1000):
+    """
+    Fourier reconstruction that works directly on continuous boundary coordinates,
+    bypassing the chain code discretization.
+
+    The chain-code approach (compute_chain_code -> fourier_reconstruct) quantizes
+    angles to 8 directions and assumes unit step lengths, which loses shape detail
+    for boundaries with few points and varying spacing. This function instead
+    parameterizes the boundary by cumulative arc length and fits Fourier series
+    to x(t) and y(t) directly.
+
+    Args:
+        boundary: Original boundary points (N x 2), ordered and closed
+        n_harmonics: Number of Fourier harmonics
+        n_points: Number of points in reconstructed boundary
+
+    Returns:
+        Reconstructed boundary points (n_points x 2)
+    """
+    n = len(boundary)
+    if n < 4:
+        return boundary
+
+    # Close the boundary for arc-length computation
+    closed = np.vstack([boundary, boundary[0:1]])
+    diffs = np.diff(closed, axis=0)
+    seg_lengths = np.linalg.norm(diffs, axis=1)
+    cum_length = np.concatenate([[0], np.cumsum(seg_lengths)])
+    total_length = cum_length[-1]
+
+    if total_length < 1e-10:
+        return boundary
+
+    # Normalize parameter to [0, 2*pi)
+    t = cum_length[:-1] / total_length * 2 * np.pi
+
+    x = boundary[:, 0]
+    y = boundary[:, 1]
+
+    # Compute Fourier coefficients
+    a0_x = np.mean(x)
+    a0_y = np.mean(y)
+
+    a_x = np.zeros(n_harmonics)
+    b_x = np.zeros(n_harmonics)
+    a_y = np.zeros(n_harmonics)
+    b_y = np.zeros(n_harmonics)
+
+    for k in range(1, n_harmonics + 1):
+        cos_kt = np.cos(k * t)
+        sin_kt = np.sin(k * t)
+        a_x[k-1] = 2 * np.mean(x * cos_kt)
+        b_x[k-1] = 2 * np.mean(x * sin_kt)
+        a_y[k-1] = 2 * np.mean(y * cos_kt)
+        b_y[k-1] = 2 * np.mean(y * sin_kt)
+
+    # Reconstruct with n_points
+    t_new = np.linspace(0, 2 * np.pi, n_points, endpoint=False)
+
+    x_new = np.full(n_points, a0_x)
+    y_new = np.full(n_points, a0_y)
+
+    for k in range(1, n_harmonics + 1):
+        cos_kt = np.cos(k * t_new)
+        sin_kt = np.sin(k * t_new)
+        x_new += a_x[k-1] * cos_kt + b_x[k-1] * sin_kt
+        y_new += a_y[k-1] * cos_kt + b_y[k-1] * sin_kt
+
+    return np.column_stack([x_new, y_new])
 
 
 # =====================================================================
@@ -1170,12 +1307,12 @@ def count_crypts_simple_method(positions, params=None, use_alpha_shape=True,
         return CryptCountResult(0, np.nan, [], boundary, np.array([]),
                                 np.array([]), np.array([]), [], np.array([]))
     
-    # Step 2: Smooth boundary using Fourier reconstruction
-    smooth_boundary = fourier_reconstruct(
+    # Step 2: Smooth boundary using direct Fourier reconstruction
+    # (bypasses chain-code discretization which destroys shape detail)
+    smooth_boundary = direct_fourier_reconstruct(
         boundary,
         n_harmonics=params.get('fourier_harmonics', 25),
         n_points=params.get('n_points', 1000),
-        normalize=True
     )
     
     # Step 3: Compute circularity

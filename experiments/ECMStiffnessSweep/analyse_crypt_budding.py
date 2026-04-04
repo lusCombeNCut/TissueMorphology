@@ -54,8 +54,10 @@ except ImportError:
 # SimpleCryptCount method (optional)
 try:
     from simple_crypt_count import (count_crypts_simple_method, DEFAULT_PARAMS,
-                                    load_final_outline, plot_debug_analysis,
-                                    plot_crypt_outline, load_final_vertex_boundary)
+                                    SIMULATION_PARAMS, PAPER_PARAMS,
+                                    load_final_outline, load_outline_at_time,
+                                    plot_debug_analysis, plot_crypt_outline,
+                                    load_final_vertex_boundary)
     HAS_SIMPLE_CRYPT_COUNT = True
 except ImportError:
     HAS_SIMPLE_CRYPT_COUNT = False
@@ -218,7 +220,7 @@ def count_crypts_2d(positions, min_prominence=0.5, min_angular_sep_deg=30.0):
 # Crypt detection — 3D (spherical)
 # =====================================================================
 
-def count_crypts_3d(positions, min_prominence=1.0, min_sep_deg=30.0):
+def count_crypts_3d(positions, min_prominence=1.0):
     """
     Detect outward radial protrusions on a 3D organoid sphere.
     Uses spherical-coordinate binning of r(theta, phi).
@@ -239,8 +241,8 @@ def count_crypts_3d(positions, min_prominence=1.0, min_sep_deg=30.0):
     phi = np.arccos(np.clip(rel[:, 2] / r, -1, 1))  # polar [0, pi]
 
     # Bin into (theta, phi) grid
-    n_theta = max(12, int(np.sqrt(len(positions))))
-    n_phi = max(6, n_theta // 2)
+    n_theta = 12
+    n_phi = 6
     theta_edges = np.linspace(-np.pi, np.pi, n_theta + 1)
     phi_edges = np.linspace(0, np.pi, n_phi + 1)
 
@@ -283,30 +285,21 @@ def count_crypts_3d(positions, min_prominence=1.0, min_sep_deg=30.0):
                         filled[it, ip] = np.mean(neighbours)
         r_grid = filled
 
-    # Flatten to 1D for peak detection (treat as unwrapped sphere surface)
-    # Simple approach: count peaks in each phi band
-    total_peaks = 0
-    peak_locs = []
+    # Step 1: detect peaks per phi band, record as a 2D boolean grid
+    peak_grid = np.zeros((n_theta, n_phi), dtype=bool)
 
     for ip in range(n_phi):
         band = r_grid[:, ip]
         if np.isnan(band).any():
             continue
-        mean_r = np.nanmean(band)
-        # Skip polar caps (too few cells for reliable detection)
-        phi_center = 0.5 * (phi_edges[ip] + phi_edges[ip + 1])
-        if phi_center < 0.3 or phi_center > np.pi - 0.3:
-            continue
 
-        # Peak detection in this phi band (circular in theta)
-        min_dist = max(2, int(min_sep_deg / (360.0 / n_theta)))
         if HAS_SCIPY:
             band_circ = np.tile(band, 3)
-            peaks, _ = find_peaks(band_circ, distance=min_dist,
-                                  prominence=min_prominence)
+            peaks, _ = find_peaks(band_circ, prominence=min_prominence)
             peaks = peaks[(peaks >= n_theta) & (peaks < 2 * n_theta)] - n_theta
             peaks = np.unique(peaks)
         else:
+            mean_r = np.nanmean(band)
             peaks = []
             for i in range(n_theta):
                 if (band[i] > band[(i-1) % n_theta] and
@@ -315,12 +308,131 @@ def count_crypts_3d(positions, min_prominence=1.0, min_sep_deg=30.0):
                     peaks.append(i)
             peaks = np.array(peaks)
 
-        total_peaks += len(peaks)
         for p in peaks:
-            theta_c = 0.5 * (theta_edges[p] + theta_edges[p + 1])
-            peak_locs.append((theta_c, phi_center))
+            peak_grid[p, ip] = True
 
-    return total_peaks, peak_locs, {'r_grid': r_grid}
+    # Step 2: connected-component labelling on peak_grid.
+    # theta axis (rows) is periodic; phi axis (cols) is not.
+    # Each connected component of adjacent peak bins = one crypt.
+    visited = np.zeros((n_theta, n_phi), dtype=bool)
+    n_crypts = 0
+    peak_locs = []
+
+    for it0 in range(n_theta):
+        for ip0 in range(n_phi):
+            if not peak_grid[it0, ip0] or visited[it0, ip0]:
+                continue
+            # BFS flood-fill for this component
+            n_crypts += 1
+            queue = [(it0, ip0)]
+            component_bins = []
+            while queue:
+                it, ip = queue.pop()
+                if visited[it, ip]:
+                    continue
+                visited[it, ip] = True
+                component_bins.append((it, ip))
+                for di, dj in [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]:
+                    ni = (it + di) % n_theta   # periodic in theta
+                    nj = ip + dj
+                    if 0 <= nj < n_phi and peak_grid[ni, nj] and not visited[ni, nj]:
+                        queue.append((ni, nj))
+            # Representative location: mean bin centre of the component
+            theta_c = np.mean([0.5 * (theta_edges[b[0]] + theta_edges[b[0] + 1])
+                               for b in component_bins])
+            phi_c = np.mean([0.5 * (phi_edges[b[1]] + phi_edges[b[1] + 1])
+                             for b in component_bins])
+            peak_locs.append((theta_c, phi_c))
+
+    return n_crypts, peak_locs, {'r_grid': r_grid, 'peak_grid': peak_grid}
+
+
+def count_crypts_3d_simple(positions, min_prominence=1.0):
+    """
+    Stripped-back 3D crypt counter.
+
+    Steps:
+      1. Convert cell positions to spherical coordinates.
+      2. Bin mean radial distance into a (N_theta x N_phi) grid.
+      3. Mark a bin as a peak if its mean-r exceeds the global mean by
+         min_prominence AND it is a local maximum among its 4 neighbours.
+      4. Merge adjacent peak bins into connected components (BFS, theta wraps).
+      Each component = one crypt.
+
+    No NaN-filling, no find_peaks, no tiling trick.
+    """
+    if len(positions) < 20:
+        return 0, [], {}
+
+    centroid = positions.mean(axis=0)
+    rel = positions - centroid
+    r = np.linalg.norm(rel, axis=1)
+
+    if r.max() - r.min() < 1e-6:
+        return 0, [], {}
+
+    theta = np.arctan2(rel[:, 1], rel[:, 0])
+    phi   = np.arccos(np.clip(rel[:, 2] / r, -1, 1))
+
+    n_theta = max(12, int(np.sqrt(len(positions))))
+    n_phi   = max(6, n_theta // 2)
+    theta_edges = np.linspace(-np.pi, np.pi, n_theta + 1)
+    phi_edges   = np.linspace(0, np.pi, n_phi + 1)
+
+    r_grid = np.full((n_theta, n_phi), np.nan)
+    for it in range(n_theta):
+        for ip in range(n_phi):
+            mask = ((theta >= theta_edges[it]) & (theta < theta_edges[it + 1]) &
+                    (phi   >= phi_edges[ip])   & (phi   < phi_edges[ip + 1]))
+            if mask.any():
+                r_grid[it, ip] = r[mask].mean()
+
+    global_mean = np.nanmean(r_grid)
+
+    # A bin is a peak if it exceeds global_mean + prominence AND beats all 4 neighbours
+    peak_grid = np.zeros((n_theta, n_phi), dtype=bool)
+    for it in range(n_theta):
+        for ip in range(n_phi):
+            v = r_grid[it, ip]
+            if np.isnan(v) or v <= global_mean + min_prominence:
+                continue
+            neighbours = [
+                r_grid[(it - 1) % n_theta, ip],
+                r_grid[(it + 1) % n_theta, ip],
+                r_grid[it, ip - 1] if ip > 0       else np.nan,
+                r_grid[it, ip + 1] if ip < n_phi-1 else np.nan,
+            ]
+            if v > np.nanmax(neighbours + [global_mean]):
+                peak_grid[it, ip] = True
+
+    # BFS connected components (theta periodic)
+    visited  = np.zeros((n_theta, n_phi), dtype=bool)
+    n_crypts = 0
+    peak_locs = []
+
+    for it0 in range(n_theta):
+        for ip0 in range(n_phi):
+            if not peak_grid[it0, ip0] or visited[it0, ip0]:
+                continue
+            n_crypts += 1
+            queue = [(it0, ip0)]
+            comp  = []
+            while queue:
+                it, ip = queue.pop()
+                if visited[it, ip]:
+                    continue
+                visited[it, ip] = True
+                comp.append((it, ip))
+                for di, dj in [(-1,0),(1,0),(0,-1),(0,1)]:
+                    ni = (it + di) % n_theta
+                    nj = ip + dj
+                    if 0 <= nj < n_phi and peak_grid[ni, nj] and not visited[ni, nj]:
+                        queue.append((ni, nj))
+            tc = np.mean([0.5*(theta_edges[b[0]]+theta_edges[b[0]+1]) for b in comp])
+            pc = np.mean([0.5*(phi_edges[b[1]]+phi_edges[b[1]+1]) for b in comp])
+            peak_locs.append((tc, pc))
+
+    return n_crypts, peak_locs, {'r_grid': r_grid, 'peak_grid': peak_grid}
 
 
 # =====================================================================
@@ -375,7 +487,7 @@ def compute_sphericity_3d(positions):
 # =====================================================================
 
 def analyse_model(base_dir, model_type, method='fourier', simple_params=None, use_outline=False,
-                  debug_plots_dir=None):
+                  debug_plots_dir=None, simple_3d=False):
     """
     Scan output directory for a model and count crypts per (stiffness, run).
     
@@ -442,15 +554,17 @@ def analyse_model(base_dir, model_type, method='fourier', simple_params=None, us
                         break
                     except (FileNotFoundError, ValueError):
                         pass
-                
+
                 # Try to load vertex mesh boundary (for vertex2d model)
+                # Use t=35h to avoid late-stage folding artefacts
                 if method == 'fourier' and 'vertex' in model_type and dim == 2:
                     try:
-                        outline_data, cell_types = load_final_vertex_boundary(sd)
+                        outline_data, cell_types = load_final_vertex_boundary(
+                            sd, target_time=35.0, dt=0.001)
                         break
                     except (FileNotFoundError, ValueError, Exception):
                         pass
-                
+
                 # Fall back to cell positions
                 try:
                     positions = load_final_positions(sd, dim)
@@ -488,9 +602,20 @@ def analyse_model(base_dir, model_type, method='fourier', simple_params=None, us
                     circ = compute_circularity_2d(positions)
                 sph = np.nan
             else:
-                n_crypts, _, _ = count_crypts_3d(positions)
+                fn = count_crypts_3d_simple if simple_3d else count_crypts_3d
+                n_crypts, crypt_locs_3d, profile_data_3d = fn(positions)
                 circ = np.nan
                 sph = compute_sphericity_3d(positions)
+                if debug_plots_dir and HAS_MATPLOTLIB:
+                    os.makedirs(debug_plots_dir, exist_ok=True)
+                    method_suffix = '_simple' if simple_3d else '_full'
+                    debug_path = os.path.join(
+                        debug_plots_dir,
+                        f'{model_type}_stiffness_{stiffness}_{run_label}_3d_crypts{method_suffix}.png')
+                    plot_3d_crypt_debug(
+                        positions, n_crypts, profile_data_3d,
+                        output_path=debug_path,
+                        title=f'{model_type} - ECM Stiffness = {stiffness} - {run_label} ({("Simple" if simple_3d else "Full")} Method)')
 
             shape_val = circ if dim == 2 else sph
             shape_name = 'circularity' if dim == 2 else 'sphericity'
@@ -508,6 +633,217 @@ def analyse_model(base_dir, model_type, method='fourier', simple_params=None, us
 # =====================================================================
 # Plotting
 # =====================================================================
+
+def plot_3d_crypt_debug(positions, n_crypts, profile_data, output_path, title=''):
+    """
+    Save a debug plot for the 3D crypt detection.
+
+    Two panels — South and North hemisphere azimuthal-equidistant projections.
+    Each (theta, phi) bin is drawn as a filled sector polygon coloured by its
+    mean radial distance.  Detected crypt components are outlined in a distinct
+    colour, with a star at the component centroid.
+    """
+    if not HAS_MATPLOTLIB:
+        return
+
+    from matplotlib.patches import Polygon as MplPolygon
+    from matplotlib.collections import PatchCollection, LineCollection
+
+    r_grid    = profile_data.get('r_grid')
+    peak_grid = profile_data.get('peak_grid')
+    if r_grid is None:
+        return
+
+    n_theta, n_phi = r_grid.shape
+    theta_edges = np.linspace(-np.pi, np.pi, n_theta + 1)
+    phi_edges   = np.linspace(0, np.pi, n_phi + 1)
+
+    r_min     = float(np.nanmin(r_grid))
+    r_max_val = float(np.nanmax(r_grid))
+    norm      = plt.Normalize(r_min, r_max_val)
+
+    # ------------------------------------------------------------------
+    # BFS: find all connected components (8-connectivity) once up-front
+    # ------------------------------------------------------------------
+    component_list = []   # list of (theta_c, phi_c, [(it, ip), ...])
+    if peak_grid is not None:
+        visited = np.zeros((n_theta, n_phi), dtype=bool)
+        for it0 in range(n_theta):
+            for ip0 in range(n_phi):
+                if not peak_grid[it0, ip0] or visited[it0, ip0]:
+                    continue
+                queue = [(it0, ip0)]
+                comp  = []
+                while queue:
+                    it, ip = queue.pop()
+                    if visited[it, ip]:
+                        continue
+                    visited[it, ip] = True
+                    comp.append((it, ip))
+                    for di, dj in [(-1,-1),(-1,0),(-1,1),
+                                   ( 0,-1),        ( 0,1),
+                                   ( 1,-1),( 1,0),( 1,1)]:
+                        ni = (it + di) % n_theta
+                        nj = ip + dj
+                        if 0 <= nj < n_phi and peak_grid[ni, nj] and not visited[ni, nj]:
+                            queue.append((ni, nj))
+                theta_c = np.mean([0.5*(theta_edges[b[0]]+theta_edges[b[0]+1]) for b in comp])
+                phi_c   = np.mean([0.5*(phi_edges[b[1]]  +phi_edges[b[1]+1])   for b in comp])
+                component_list.append((theta_c, phi_c, comp))
+
+    # ------------------------------------------------------------------
+    # Helper: sector polygon for bin (it, ip) in one hemisphere
+    # sign= 1 → south (pole = +z top), sign=-1 → north (pole = -z top)
+    # ------------------------------------------------------------------
+    def bin_polygon(it, ip, sign):
+        th_lo, th_hi = theta_edges[it], theta_edges[it + 1]
+        ph_lo, ph_hi = phi_edges[ip],   phi_edges[ip + 1]
+        if sign == 1:
+            rho_lo, rho_hi = ph_lo, ph_hi
+        else:
+            rho_lo, rho_hi = np.pi - ph_hi, np.pi - ph_lo
+        rho_lo = max(0.0, rho_lo)
+        th_arc = np.linspace(th_lo, th_hi, 6)
+        pts  = [(rho_lo * np.cos(t), rho_lo * np.sin(t)) for t in th_arc]
+        pts += [(rho_hi * np.cos(t), rho_hi * np.sin(t)) for t in th_arc[::-1]]
+        return pts
+
+    # ------------------------------------------------------------------
+    # Build figure
+    # ------------------------------------------------------------------
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6))
+    # fig.suptitle(title, fontsize=10)
+
+    last_pc   = None
+    circ_t    = np.linspace(0, 2 * np.pi, 300)
+    equator_r = np.pi / 2
+
+    for ax_idx, (hemi_label, sign) in enumerate([
+            ('South hemisphere  (φ < 90°)', 1),
+            ('North hemisphere  (φ > 90°)', -1)]):
+
+        ax = axes[ax_idx]
+
+        # ---- background bin patches ----
+        patches = []
+        colors  = []
+        for it in range(n_theta):
+            for ip in range(n_phi):
+                phi_c = 0.5 * (phi_edges[ip] + phi_edges[ip + 1])
+                if sign == 1 and phi_c >= np.pi / 2:
+                    continue
+                if sign == -1 and phi_c < np.pi / 2:
+                    continue
+                if np.isnan(r_grid[it, ip]):
+                    continue
+                patches.append(MplPolygon(bin_polygon(it, ip, sign), closed=True))
+                colors.append(r_grid[it, ip])
+
+        if patches:
+            pc = PatchCollection(patches, cmap='viridis', norm=norm,
+                                 linewidths=0, zorder=1)
+            pc.set_array(np.array(colors))
+            ax.add_collection(pc)
+            last_pc = pc
+
+        # ---- crypt component outlines + per-bin stars ----
+        for comp_idx, (theta_c, phi_c, comp_bins) in enumerate(component_list):
+            comp_set = set(comp_bins)
+            boundary_segs = []   # list of Nx2 arrays for LineCollection
+
+            for (it, ip) in comp_bins:
+                bin_phi_c = 0.5 * (phi_edges[ip] + phi_edges[ip + 1])
+                bin_in_hemi = (bin_phi_c < np.pi / 2) if sign == 1 else (bin_phi_c >= np.pi / 2)
+                if not bin_in_hemi:
+                    continue
+
+                th_lo, th_hi = theta_edges[it], theta_edges[it + 1]
+                ph_lo, ph_hi = phi_edges[ip], phi_edges[ip + 1]
+                rho_lo = max(0.0, ph_lo  if sign == 1 else np.pi - ph_hi)
+                rho_hi =         (ph_hi  if sign == 1 else np.pi - ph_lo)
+
+                # Left radial edge — neighbour (it-1, ip)
+                if ((it - 1) % n_theta, ip) not in comp_set:
+                    boundary_segs.append(np.array([
+                        [rho_lo * np.cos(th_lo), rho_lo * np.sin(th_lo)],
+                        [rho_hi * np.cos(th_lo), rho_hi * np.sin(th_lo)]]))
+
+                # Right radial edge — neighbour (it+1, ip)
+                if ((it + 1) % n_theta, ip) not in comp_set:
+                    boundary_segs.append(np.array([
+                        [rho_lo * np.cos(th_hi), rho_lo * np.sin(th_hi)],
+                        [rho_hi * np.cos(th_hi), rho_hi * np.sin(th_hi)]]))
+
+                # Inner arc — neighbour (it, ip-1)
+                nj_in = ip - 1
+                if nj_in < 0 or (it, nj_in) not in comp_set:
+                    arc = np.linspace(th_lo, th_hi, 8)
+                    boundary_segs.append(np.column_stack(
+                        [rho_lo * np.cos(arc), rho_lo * np.sin(arc)]))
+
+                # Outer arc — neighbour (it, ip+1), respecting hemisphere split
+                nj_out = ip + 1
+                outer_in_comp = False
+                if nj_out < n_phi:
+                    outer_phi_c = 0.5 * (phi_edges[nj_out] + phi_edges[nj_out + 1])
+                    outer_in_hemi = (outer_phi_c < np.pi / 2) if sign == 1 else (outer_phi_c >= np.pi / 2)
+                    outer_in_comp = outer_in_hemi and (it, nj_out) in comp_set
+                if not outer_in_comp:
+                    arc = np.linspace(th_lo, th_hi, 8)
+                    boundary_segs.append(np.column_stack(
+                        [rho_hi * np.cos(arc), rho_hi * np.sin(arc)]))
+
+                # black star at bin centre
+                bin_theta_c = 0.5 * (th_lo + th_hi)
+                rho_bin = bin_phi_c if sign == 1 else (np.pi - bin_phi_c)
+                ax.plot(rho_bin * np.cos(bin_theta_c), rho_bin * np.sin(bin_theta_c),
+                        '*', color='black', markersize=10,
+                        markeredgecolor='white', markeredgewidth=0.4, zorder=3)
+
+            if boundary_segs:
+                lc = LineCollection(boundary_segs, colors='red',
+                                    linewidths=2.2, zorder=2)
+                ax.add_collection(lc)
+
+        # ---- decorations ----
+        # Outer circle (equator)
+        ax.plot(equator_r * np.cos(circ_t), equator_r * np.sin(circ_t),
+                color='black', lw=1.2, alpha=0.8, zorder=4)
+        # Latitude rings at 30° and 60° from pole
+        for lat_deg in [30, 60]:
+            rho_lat = np.radians(lat_deg)
+            ax.plot(rho_lat * np.cos(circ_t), rho_lat * np.sin(circ_t),
+                    color='black', lw=0.5, ls=':', alpha=0.5, zorder=4)
+        # Radial lines every 45° with angle labels
+        for deg in range(0, 360, 45):
+            rad = np.radians(deg)
+            ax.plot([0, equator_r * np.cos(rad)], [0, equator_r * np.sin(rad)],
+                    color='black', lw=0.5, alpha=0.5, zorder=4)
+            lx = (equator_r + 0.12) * np.cos(rad)
+            ly = (equator_r + 0.12) * np.sin(rad)
+            ax.text(lx, ly, f'{deg}°', color='black', fontsize=10,
+                    ha='center', va='center')
+
+        ax.set_aspect('equal')
+        ax.set_title(hemi_label, fontsize=14)
+        ax.axis('off')
+
+    # ------------------------------------------------------------------
+    # Shared colorbar
+    # ------------------------------------------------------------------
+    fig.subplots_adjust(right=0.86)
+    cbar_ax = fig.add_axes([0.88, 0.15, 0.02, 0.7])
+    if last_pc is not None:
+        cb = fig.colorbar(last_pc, cax=cbar_ax)
+        cb.set_label('radial distance r (cell diameters)', fontsize=13)
+        cb.ax.tick_params(labelsize=11)
+
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    svg_path = output_path.replace('.png', '.svg')
+    plt.savefig(svg_path, bbox_inches='tight')
+    plt.close()
+    print(f"  Saved 3D debug: {output_path}")
+
 
 COLORS = {
     'node2d': 'steelblue',
@@ -715,6 +1051,8 @@ def main():
                         help='Min normalized arc length (SimpleCryptCount)')
     parser.add_argument('--debug-plots', action='store_true',
                         help='Save debug plots showing crypt outlines for all runs')
+    parser.add_argument('--simple-3d', action='store_true',
+                        help='Use stripped-back 3D crypt counter (threshold + BFS only, no find_peaks)')
 
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -765,15 +1103,17 @@ def main():
     for model_type in models:
         print(f"\n--- Analysing {LABELS.get(model_type, model_type)} ---")
         
-        # Set up debug plots directory if requested (only for SimpleCryptCount method)
+        # Set up debug plots directory if requested
         debug_plots_dir = None
-        if args.debug_plots and args.method == 'fourier':
+        is_3d = '3d' in model_type
+        if args.debug_plots and (args.method == 'fourier' or is_3d):
             debug_plots_dir = os.path.join(args.output_dir, 'debug_plots')
         
-        results = analyse_model(args.base_dir, model_type, 
+        results = analyse_model(args.base_dir, model_type,
                                method=args.method, simple_params=simple_params,
                                use_outline=use_outline,
-                               debug_plots_dir=debug_plots_dir)
+                               debug_plots_dir=debug_plots_dir,
+                               simple_3d=args.simple_3d)
 
         if results:
             all_results[model_type] = results
