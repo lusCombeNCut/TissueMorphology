@@ -39,6 +39,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include "Exception.hpp"
 #include "UblasVectorInclude.hpp"
 #include "RandomNumberGenerator.hpp"
 #include "OutputFileHandler.hpp"
@@ -474,6 +475,31 @@ public:
         // Update positions (overdamped EoM — separate from constitutive law)
         double inv_damping = 1.0 / mGhostDamping;
         double scale = inv_damping * dt;
+
+        // Check for numerical instability before updating positions.
+        // For forward Euler with N spring neighbours per node the CFL-like
+        // condition is  (E0 + E1) * N * dt / eta < 2.  We use max neighbour
+        // count and report a clear error if violated.
+        {
+            unsigned max_neighbours = 0;
+            for (const auto& node : mNodes)
+            {
+                if (node.is_active && node.neighbours.size() > max_neighbours)
+                    max_neighbours = node.neighbours.size();
+            }
+            double cfl = (mRelaxedStiffness + mRelaxationModulus)
+                         * max_neighbours * dt / mGhostDamping;
+            if (cfl >= 2.0)
+            {
+                EXCEPTION("Ghost ECM numerical instability detected: CFL = "
+                          << cfl << " >= 2 (E0=" << mRelaxedStiffness
+                          << ", E1=" << mRelaxationModulus
+                          << ", neighbours=" << max_neighbours
+                          << ", dt=" << dt << ", damping=" << mGhostDamping
+                          << "). Reduce dt or increase ghostDamping.");
+            }
+        }
+
         for (auto& node : mNodes)
         {
             if (!node.is_active) continue;
