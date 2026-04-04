@@ -86,10 +86,7 @@ int main(int argc, char* argv[])
 #define TM_GIT_HASH "unknown"
 #endif
             std::stringstream subdir;
-            subdir << "CryptBudding/" << TM_GIT_HASH
-                   << "/" << params.modelType
-                   << "/" << params.GetEcmLabel()
-                   << "/run_" << params.runNumber;
+            subdir << "CryptBudding/" << TM_GIT_HASH;
             outputSubdir = subdir.str();
 
             // Save a copy of the parameters to the output folder for reference

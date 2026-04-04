@@ -1,8 +1,8 @@
 {
   "unitConversion": {
     "usePhysicalUnits": false,
-    "cellDiameterMicrometers": 10.0,
-    "referenceForcenN": 10.0,
+    "cellDiameterMicrometers": 8.0,
+    "referenceForcenN": 5.0,
     "referenceVelocityUmPerH": 10.0,
     "_comment": "Set usePhysicalUnits to true to define parameters in physical units (N/m, Pa, N·m)."
   },
@@ -80,7 +80,7 @@
 
     "NagaiHondaForce": {
       "_comment_lambda_m": "nhMembraneSurface reduced from 10.0: Farhadifar (2007) soft regime with K_A=100 gives 4.0. 10.0 is 2.5× too high.",
-      "nhMembraneSurface": 4.0,
+      "nhMembraneSurface": 10.0,
       "_comment_gamma_cc": "nhCellCellAdhesion set to Farhadifar (2007) soft regime, K_A=100 (Λ=12.0).",
       "nhCellCellAdhesion": 12.0,
       "_comment_gamma_b": "nhBoundaryAdhesion = 1.17 × γ_cc; Fletcher (2014) free edge convention.",
