@@ -17,20 +17,20 @@
 
   "features": {
     "enableRelaxation": false,
-    "enableLumenPressure": true,
+    "enableLumenPressure": false,
     "enableApicalConstriction": false,
     "enableCurvatureBending": false,
     "enableCellPolarity": false,
-    "enableDifferentialAdhesion": true,
-    "enableEcmConfinement": true,
-    "enableGhostNodeECM": true,
-    "enableViscoelasticECM": true,
+    "enableDifferentialAdhesion": false,
+    "enableEcmConfinement": false,
+    "enableGhostNodeECM": false,
+    "enableViscoelasticECM": false,
     "enableEcmGuidance": false,
     "enableSloughing": false,
-    "enableLumenHole": true,
+    "enableLumenHole": false,
     "useTopologyBasedSprings": false,
     "enableContinuousPvd": false,
-    "enableNonNeighbourCellRepulsion": true
+    "enableNonNeighbourCellRepulsion": false
   },
 
   "geometry": {
@@ -69,8 +69,8 @@
       "ghostSpringRestLength": 1.0,
       "ghostRemovalCheckInterval": 100,
       "ViscoelasticECM": {
-        "ghostRelaxedStiffness": 5.0,
-        "ghostRelaxationModulus": 1.0,
+        "ghostE0": 5.0,
+        "ghostE1": 1.0,
         "_comment_E1": "Reduced from 2.0: E1/E0 = 0.20 is upper bound of Fertala et al. (2025) microgel AFM (range 0.05–0.20).",
         "ghostRelaxationTime": 1.0
       }
