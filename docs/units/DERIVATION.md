@@ -84,7 +84,7 @@ This is ~40,000× higher than Stokes drag, reflecting the dominant role of focal
 
 Using defaults: $\eta_{\text{phys}} = 3.6\ \text{N}\cdot\text{s}/\text{m}$, $T_0 = 3600\ \text{s}$, $L_0 = 10^{-5}\ \text{m}$.
 
-### ECM Stiffness (`ecmStiffness = 50.0`)
+### ECM Stiffness (`cellGhostSpringStiffness = 50.0`)
 
 $$k_{\text{phys}} = 50.0 \times \frac{3.6}{3600} = 0.05\ \text{N/m}$$
 
@@ -94,7 +94,7 @@ $$E = \frac{k_{\text{phys}} \cdot L}{A}
 = \frac{0.05 \times 50 \times 10^{-6}}{100 \times 10^{-12}}
 = 25{,}000\ \text{Pa} = 25\ \text{kPa}$$
 
-**Literature range for intestinal mucosa: 5–15 kPa.** The default of 50.0 is slightly stiff (25 kPa ≈ fibrotic range). Reducing `ecmStiffness` to ~20–30 would target healthy intestine.
+**Literature range for intestinal mucosa: 5–15 kPa.** The default of 50.0 is slightly stiff (25 kPa ≈ fibrotic range). Reducing `cellGhostSpringStiffness` to ~20–30 would target healthy intestine.
 
 ### Lumen Pressure (`lumenPressure = 5.0`)
 
@@ -182,7 +182,7 @@ class ChasteTissueUnitConverter:
 # Example: default parameters
 c = ChasteTissueUnitConverter()
 
-print(f"\necmStiffness=50.0:    {c.stiffness_to_N_per_m(50.0):.4f} N/m  →  {c.stiffness_to_elastic_modulus_kPa(50.0):.1f} kPa")
+print(f"\ncellGhostSpringStiffness=50.0:    {c.stiffness_to_N_per_m(50.0):.4f} N/m  →  {c.stiffness_to_elastic_modulus_kPa(50.0):.1f} kPa")
 print(f"springStiffness=15.0: {c.stiffness_to_N_per_m(15.0):.4f} N/m")
 print(f"lumenPressure=5.0:    {c.pressure_to_Pa(5.0):.1f} Pa")
 print(f"bendingStiffness=30.0:{c.bending_stiffness_to_N_m(30.0):.2e} N·m")

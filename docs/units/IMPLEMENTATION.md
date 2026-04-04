@@ -24,8 +24,8 @@ Comprehensive conversion method that:
 - Derives pressure conversion factor: `p_factor = η_drag`
 - Applies conversions to all relevant parameters:
   - **Stiffness parameters** (multiplied by `k_factor`):
-    - `ecmStiffness`, `springStiffness`, `bendingStiffness`
-    - Ghost node ECM: `ghostGhostStiffness`, `ghostCellGhostStiffness`, `ghostRelaxedStiffness`, `ghostRelaxationModulus`
+    - `cellGhostSpringStiffness`, `springStiffness`, `bendingStiffness`
+    - Ghost node ECM: `ghostGhostStiffness`, `ghostCellGhostStiffness`, `ghostE0`, `ghostE1`
     - Nagai-Honda surface tensions: `gammaApical`, `gammaBasal`, `gammaLateral`
     - Adhesion parameters: `nhMembraneSurface`, `nhCellCellAdhesion`, `nhBoundaryAdhesion`, and all per-type adhesions (12 total)
   - **Pressure/force parameters** (multiplied by `p_factor`):
@@ -171,7 +171,7 @@ cellDiameterMicrometers = 10.0
 tissueViscosityPaS = 1.0
 
 [ECM]
-ecmStiffness = 1000.0    # Now interpreted as 1 kPa
+cellGhostSpringStiffness = 1000.0    # Now interpreted as 1 kPa
 
 [Forces]
 [LumenPressureForce]
@@ -187,7 +187,7 @@ lumenPressure = 500.0    # Now interpreted as 500 Pa
     "tissueViscosityPaS": 1.0
   },
   "ECM": {
-    "ecmStiffness": 1000.0
+    "cellGhostSpringStiffness": 1000.0
   },
   "forces": {
     "LumenPressureForce": {
@@ -205,13 +205,13 @@ lumenPressure = 500.0    # Now interpreted as 500 Pa
 ## Parameters Affected by Unit Conversion
 
 ### Stiffness Parameters (×k_factor):
-1. ecmStiffness
+1. cellGhostSpringStiffness
 2. springStiffness
 3. bendingStiffness
 4. ghostGhostStiffness
 5. ghostCellGhostStiffness
-6. ghostRelaxedStiffness
-7. ghostRelaxationModulus
+6. ghostE0
+7. ghostE1
 8. ecmConfinementStiffness
 9. gammaApical
 10. gammaBasal

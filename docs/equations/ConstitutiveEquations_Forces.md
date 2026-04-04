@@ -211,7 +211,7 @@ $$
 
 | Symbol | Parameter | Default | CryptBudding |
 |--------|-----------|---------|--------------|
-| $\lambda_d$ | `NagaiHondaDeformationEnergyParameter` | 100.0 | `ecmStiffness` |
+| $\lambda_d$ | `NagaiHondaDeformationEnergyParameter` | 100.0 | `cellGhostSpringStiffness` |
 | $\lambda_m$ | `NagaiHondaMembraneSurfaceEnergyParameter` | 10.0 | 10.0 |
 | $\gamma_{\text{cell-cell}}$ | `NagaiHondaCellCellAdhesionEnergyParameter` | 0.5 | 1.0 |
 | $\gamma_{\text{boundary}}$ | `NagaiHondaCellBoundaryAdhesionEnergyParameter` | 1.0 | 2.0 |
@@ -341,7 +341,7 @@ $$
 
 | Symbol | Parameter | Default |
 |--------|-----------|---------|
-| $k$ | `bmStiffnessNode` or `bmStiffnessVertex` | $= $ `ecmStiffness` (node) or `ecmStiffness × 0.5` (vertex) |
+| $k$ | `bmStiffnessNode` or `bmStiffnessVertex` | $= $ `cellGhostSpringStiffness` (node) or `cellGhostSpringStiffness × 0.5` (vertex) |
 | $R_0$ | Initial BM radius (2D: $R_{\text{org}} + 2$; 3D: $R_{\text{org}} + 2$) | model-specific |
 | $\dot{R}$ | `ecmDegradationRate` | 0.02 |
 | $R_{\max}$ | Maximum degraded radius | $4 \times R_{\text{org}}$ |

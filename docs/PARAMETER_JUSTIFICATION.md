@@ -23,13 +23,13 @@ $$U_\alpha = \lambda_d(A_\alpha - A_\alpha^0)^2 + \lambda_m(L_\alpha - L_\alpha^
 p_nh->SetDeformationEnergyParameter(100.0);
 ```
 The source comment reads: *"Deformation energy should be ~100 (Nagai-Honda default) for area
-stability. ecmStiffness is used for ECM field stiffness, not the vertex deformation energy."*
+stability. cellGhostSpringStiffness is used for ECM field stiffness, not the vertex deformation energy."*
 
 **Source:** `NagaiHondaForce.cpp` line 41 confirms: *"This is 1.0 in the Nagai & Honda paper."*
 The Chaste convention scales all NH parameters up by ×100 relative to the original
 Nagai & Honda (2001) paper (*Philosophical Magazine B*, 81(7), 699–719.
 doi:[10.1080/13642810108205772](https://doi.org/10.1080/13642810108205772)).
-**λ_d = 100 is not set by ecmStiffness** — the ConstitutiveEquations_Forces.md is wrong
+**λ_d = 100 is not set by cellGhostSpringStiffness** — the ConstitutiveEquations_Forces.md is wrong
 on this point. **Do not change λ_d unless you want to leave the standard Chaste convention.**
 
 ---
@@ -231,7 +231,7 @@ The ECM is modelled as a Standard Linear Solid:
 
 $$E(t) = E_0 + E_1\,e^{-t/\tau}$$
 
-### E₀ — Relaxed stiffness (`ghostRelaxedStiffness = 5.0`)
+### E₀ — Relaxed stiffness (`ghostE0 = 5.0`)
 
 **Source:** Fertala et al. (2025), bioRxiv doi:[10.1101/2025.07.02.662292](https://doi.org/10.1101/2025.07.02.662292)
 *(preprint; not yet peer-reviewed)*
@@ -248,7 +248,7 @@ E₀ and τ. The Chaste value `5.0` (dimensionless force/CD) cannot be directly 
 Pa without knowing η — only the **ratios** E₁/E₀ and the relaxation time τ are
 physically meaningful comparisons.
 
-### E₁ — Relaxation modulus (`ghostRelaxationModulus`)
+### E₁ — Relaxation modulus (`ghostE1`)
 
 **Current JSON value:** `2.0` → E₁/E₀ = **0.40**
 **C++ source default** (`ViscoelasticGhostNodeEcmField.hpp` line 165): `1.0` → E₁/E₀ = **0.20**
@@ -260,7 +260,7 @@ justified. The JSON override of 2.0 (ratio 0.40) **exceeds the experimentally me
 by a factor of 2. This was presumably chosen to make viscoelastic effects more observable
 during the simulation, but does not represent the measured hydrogel.
 
-**Suggested value:** `ghostRelaxationModulus = 1.0` (E₁/E₀ = 0.20 — upper bound of measured range)
+**Suggested value:** `ghostE1 = 1.0` (E₁/E₀ = 0.20 — upper bound of measured range)
 
 If you want to model softer viscoelasticity closer to the median, use `0.5` (E₁/E₀ = 0.10).
 
@@ -318,8 +318,8 @@ crypt simulations but lacks a single direct experimental calibration.
 | gammaBasal | 0.85 | **0.7** | Pérez-González (2021); D&S (2024); apical ≠ basal | ✗ Should not equal apical |
 | gammaLateral | 0.70 | 0.7 | Drozdowski & Schwarz (2024) | ✓ OK |
 | gammaStemScale (uniform) | 0.7 | — | Cannot reproduce crypt-base vs TA-zone tension asymmetry | ✗ Architecture limitation |
-| ghostRelaxedStiffness (E₀) | 5.0 | 5.0 | Fertala et al. (2025); ratio only | ✓ OK |
-| ghostRelaxationModulus (E₁) | 2.0 | **1.0** | Fertala et al. (2025); current exceeds range | ✗ Reduce |
+| ghostE0 (E₀) | 5.0 | 5.0 | Fertala et al. (2025); ratio only | ✓ OK |
+| ghostE1 (E₁) | 2.0 | **1.0** | Fertala et al. (2025); current exceeds range | ✗ Reduce |
 | ghostRelaxationTime (τ) | 1.0 h | 1.0 h | Fertala 0.5–1 s (molecule); ~hour for ECM remodelling | ⚠ Acknowledge |
 | ghostDamping | 5.0 | 5.0 | No source; numerical | ✗ No source |
 | ghostFibreRemodelingRate | 0.1 | 0.1 | No source; phenomenological | ✗ No source |

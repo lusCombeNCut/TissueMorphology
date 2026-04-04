@@ -28,3 +28,5 @@ experiments/ECMStiffnessSweep/failed-run-logs/*
 
 
 debug_output/
+docs/api/
+__pycache__/

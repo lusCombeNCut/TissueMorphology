@@ -28,24 +28,24 @@ TissueMorphology/
 │   └── _unused/                                # Archived unused classes
 ├── apps/
 │   ├── src/
-│   │   ├── CryptBuddingApp.cpp                 # Main entry point (CLI + INI dispatch)
-│   │   ├── CryptBuddingParams.hpp              # INI parser + parameter struct + autotuning
+│   │   ├── CryptBuddingApp.cpp                 # Main entry point (CLI + JSON dispatch)
+│   │   ├── CryptBuddingParams.hpp              # JSON parser + parameter struct + autotuning
 │   │   ├── RunNode2d.hpp                       # 2D node-based runner
 │   │   ├── RunVertex2d.hpp                     # 2D vertex-based runner
 │   │   ├── RunNode3d.hpp                       # 3D node-based runner
 │   │   ├── RunVertex3d.hpp                     # 3D vertex-based runner
 │   │   ├── CryptBuddingSummaryModifier.hpp     # Per-timestep summary CSV writer
 │   │   └── CryptBuddingUtils.hpp               # Shared utilities (cell assignment, killers)
-│   ├── params-Node2d.ini                       # Tuned parameters for 2D node model
-│   ├── params-Vertex2d.ini                     # Tuned parameters for 2D vertex model
-│   ├── config/default_params.ini               # Template matching SetDefaults()
+│   ├── params-Node2d.json                      # Tuned parameters for 2D node model
+│   ├── params-Vertex2d.json                    # Tuned parameters for 2D vertex model
+│   ├── config/default_params.json              # Template matching SetDefaults()
 │   └── README.md                               # Configuration reference
 ├── test/
 │   ├── CryptBudding/TestCryptBudding.hpp       # Integration test
 │   ├── ECMForces/                              # ECM force unit tests
 │   ├── Invasion/                               # Invasive front experiments
 │   └── ContinuousTestPack.txt                  # CTest registration
-├── docs/                                       # Constitutive equations + design docs
+├── docs/                                       # Equations, quickstart, unit conversion, architecture
 ├── experiments/                                # Sweep scripts + analysis
 ├── hpc/                                        # HPC submission scripts
 ├── scripts/                                    # Utility scripts
@@ -148,8 +148,8 @@ Produces: crypt count vs stiffness box plots, mean±SD plots, CSV summary, model
 
 The simulation uses the **Stochastic Four-Type Cell Cycle Model** (Montes-Olivas et al. 2023)
 with contact inhibition, supporting four cell types: Stem (SC), Transit-Amplifying (TA),
-Paneth (PC), and Enterocyte (EC). See `docs/ConstitutiveEquations_CellCycles.md` for full
-equations and `apps/README.md` for parameter mapping.
+Paneth (PC), and Enterocyte (EC). See `docs/equations/ConstitutiveEquations_CellCycles.md`
+for full equations and `apps/README.md` for parameter mapping.
 
 ### Key Parameters
 
@@ -165,7 +165,7 @@ equations and `apps/README.md` for parameter mapping.
 | End time | 48 h (local) / sweep-dependent | 168 h |
 | dt | 0.005 | 0.005 (overrides autotuning) |
 
-See `apps/params-Node2d.ini` and `apps/params-Vertex2d.ini` for full parameter listings.
+See `apps/params-Node2d.json` and `apps/params-Vertex2d.json` for full parameter listings.
 
 ### Environment Variables
 

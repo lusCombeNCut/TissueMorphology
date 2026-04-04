@@ -31,14 +31,14 @@ With `usePhysicalUnits: true`, you can now express stiffness in **kPa** instead 
 ```json
 "forces": {
   "ECMConfinementForce": {
-    "ecmStiffness": 10.0,    # Now in kPa (was non-dimensional before)
+    "cellGhostSpringStiffness": 10.0,    # Now in kPa (was non-dimensional before)
     ...
   },
   "GhostNodeECM": {
     "ghostGhostStiffness": 5.0,        # kPa
     "ghostCellGhostStiffness": 5.0,    # kPa
-    "ghostRelaxedStiffness": 2.0,      # kPa
-    "ghostRelaxationModulus": 1.0      # kPa
+    "ghostE0": 2.0,      # kPa
+    "ghostE1": 1.0      # kPa
   }
 }
 ```
@@ -112,13 +112,13 @@ Computed quantities:
 
 | Parameter | Location | Use Case |
 |-----------|----------|----------|
-| `ecmStiffness` | `forces.ECMConfinementForce` | ECM elastic modulus |
+| `cellGhostSpringStiffness` | `forces.ECMConfinementForce` | ECM elastic modulus |
 | `springStiffness` | `forces.SpringForce` | Cell-cell adhesion spring |
 | `bendingStiffness` | `forces.RingSmoothingForce` | Monolayer curvature bending |
 | `ghostGhostStiffness` | `forces.GhostNodeECM` | ECM-ECM fiber interactions |
 | `ghostCellGhostStiffness` | `forces.GhostNodeECM` | Cell-ECM interactions |
-| `ghostRelaxedStiffness` | `forces.GhostNodeECM.ViscoelasticECM` | Long-time elastic modulus (Maxwell model) |
-| `ghostRelaxationModulus` | `forces.GhostNodeECM.ViscoelasticECM` | Transient elastic modulus (Maxwell model) |
+| `ghostE0` | `forces.GhostNodeECM.ViscoelasticECM` | Long-time elastic modulus (Maxwell model) |
+| `ghostE1` | `forces.GhostNodeECM.ViscoelasticECM` | Transient elastic modulus (Maxwell model) |
 | `nhMembraneSurface` | `forces.VertexModel` | Membrane elasticity (vertex models) |
 | `gammaApical` | `forces.VertexModel` | Apical surface tension (vertex models) |
 | `gammaBasal` | `forces.VertexModel` | Basal surface tension (vertex models) |
@@ -169,7 +169,7 @@ These remain **dimensionless** even with `usePhysicalUnits=true`:
 ```json
 "forces": {
   "ECMConfinementForce": {
-    "ecmStiffness": 7.5,         # 7.5 kPa — normal tissue
+    "cellGhostSpringStiffness": 7.5,         # 7.5 kPa — normal tissue
     ...
   }
 }
@@ -189,7 +189,7 @@ Drag coefficient: 9.42e-05 Pa·s·m
 Stiffness conversion factor: 9.42
 Pressure conversion factor: 9.42e-04
 
-Converted ecmStiffness: 7.5 kPa → 70.7 (simulation units)
+Converted cellGhostSpringStiffness: 7.5 kPa → 70.7 (simulation units)
 ```
 
 ---
@@ -243,9 +243,9 @@ Drag coefficient doubles → stiffness conversion factor doubles → all stiffne
 ```json
 "forces": {
   "ECMConfinementForce": {
-    "ecmStiffness": 7.5       # Normal
-    // "ecmStiffness": 20.0   # Inflamed
-    // "ecmStiffness": 75.0   # Fibrotic
+    "cellGhostSpringStiffness": 7.5       # Normal
+    // "cellGhostSpringStiffness": 20.0   # Inflamed
+    // "cellGhostSpringStiffness": 75.0   # Fibrotic
   }
 }
 ```
@@ -298,7 +298,7 @@ To revert to non-dimensional mode:
   },
   "forces": {
     "ECMConfinementForce": {
-      "ecmStiffness": 70.7,       # Back to simulation units
+      "cellGhostSpringStiffness": 70.7,       # Back to simulation units
       ...
     }
   }

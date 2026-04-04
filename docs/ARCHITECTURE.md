@@ -177,7 +177,7 @@ Parameters that trigger autotuning in `Finalise()`:
 - `endTime` — 168h for most models if not set
 - `t1Threshold2d` — from ecmConfinementStiffness threshold
 - `t2Threshold2d` — 0.05 default
-- `ecmConfinementStiffness` — falls back to `ecmStiffness` if sentinel
+- `ecmConfinementStiffness` — falls back to `cellGhostSpringStiffness` if sentinel
 - Radii (`bmRadius2d`, `ecmMaxRadius2d`, etc.) — from fraction × organoidRadius
 
 Setting any of these explicitly in the INI file prevents the override.
