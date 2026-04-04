@@ -38,8 +38,8 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=4G
-#SBATCH --time=12:00:00
-#SBATCH --array=0-109%110
+#SBATCH --time=4:00:00
+#SBATCH --array=0-99%20
 #SBATCH --output=/user/work/%u/logs/ecm_stiffness_sweep/slurm-%A_%a.out
 #SBATCH --error=/user/work/%u/logs/ecm_stiffness_sweep/slurm-%A_%a.err
 
@@ -349,10 +349,10 @@ fi
 # #############################################################################
 
 # ---------- Shear modulus sweep parameters ----------
-# ECM shear modulus in Pa: 100 to 2100 in 200 Pa steps (11 values)
-SHEAR_MODULUS_VALUES=(100 300 500 700 900 1100 1300 1500 1700 1900 2100)
+# ECM shear modulus in Pa: 100 to 1900 in 200 Pa steps (10 values)
+SHEAR_MODULUS_VALUES=(100 300 500 700 900 1100 1300 1500 1700 1900)
 NUM_SHEAR_MODULUS=${#SHEAR_MODULUS_VALUES[@]}
-NUM_REPLICATES=10
+NUM_REPLICATES=5
 
 # Decode array task ID → (shear_modulus_index, replicate)
 SHEAR_MODULUS_INDEX=$((SLURM_ARRAY_TASK_ID / NUM_REPLICATES))
