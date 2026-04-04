@@ -29,10 +29,10 @@ from pathlib import Path
 # surface tensions in N/m and ARE converted.
 
 STIFFNESS_PARAMS = {
-    "ecmStiffness",
+    "cellGhostSpringStiffness",
     "springStiffness",
-    "ghostRelaxedStiffness",
-    "ghostRelaxationModulus",
+    "ghostE0",
+    "ghostE1",
     "gammaApical",
     "gammaBasal",
     "gammaLateral",
@@ -70,10 +70,10 @@ ALL_CONVERTED = STIFFNESS_PARAMS | PRESSURE_PARAMS | BENDING_PARAMS
 # sim value, preventing C++ from applying the conversion to its own default.
 CPP_SIM_DEFAULTS = {
     # Stiffness [sim units, converted by /kF in C++]
-    "ecmStiffness":              5.0,
+    "cellGhostSpringStiffness": 5.0,
     "springStiffness":          30.0,
-    "ghostRelaxedStiffness":     5.0,
-    "ghostRelaxationModulus":    1.0,
+    "ghostE0":               5.0,
+    "ghostE1":               1.0,
     "gammaApical":               0.85,
     "gammaBasal":                0.85,
     "gammaLateral":              0.7,
