@@ -20,8 +20,8 @@ import matplotlib.cm as cm
 HAS_MATPLOTLIB = True
 
 # Default plot geometry (A4, 1-inch margins, 2 columns)
-DEFAULT_FIG_WIDTH = 3.15   # inches
-DEFAULT_FIG_HEIGHT = 2.4   # inches
+DEFAULT_FIG_WIDTH = 10   # inches
+DEFAULT_FIG_HEIGHT = 8   # inches
 DEFAULT_FONT_SCALE = 1.0
 
 # Mutable globals set by add_common_args / apply_common_args
@@ -94,8 +94,7 @@ def setup_style():
 
 
 def _save_fig(output_path):
-    """Save the current figure as both PNG and SVG."""
-    plt.savefig(output_path)
+    """Save the current figure as SVG."""
     svg_path = os.path.splitext(output_path)[0] + '.svg'
     plt.savefig(svg_path, format='svg')
 
@@ -682,12 +681,6 @@ def plot_final_value_boxplot(sweep_data, column, param_name, param_unit,
     for patch in bp['boxes']:
         patch.set_facecolor(box_colour)
         patch.set_alpha(0.4)
-
-    for i, (pval, vals) in enumerate(zip(param_vals, final_values)):
-        if vals:
-            jitter = np.random.normal(0, 0.08, len(vals))
-            ax.scatter(np.full(len(vals), i) + jitter, vals,
-                       color=box_colour, alpha=0.6, s=30, zorder=5)
 
     ax.set_xticks(range(len(param_vals)))
     ax.set_xticklabels(labels, rotation=45)

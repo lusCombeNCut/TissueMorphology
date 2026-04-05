@@ -75,10 +75,6 @@ def plot_circularity_summary(circ_results, plots_dir, model_type):
     for i, patch in enumerate(bp['boxes']):
         patch.set_facecolor(colours[stiffnesses[i]])
         patch.set_alpha(0.4)
-    for i, (s, d) in enumerate(zip(stiffnesses, data)):
-        jitter = np.random.normal(0, 0.08, len(d))
-        ax.scatter(np.full(len(d), i) + jitter, d,
-                   color=colours[s], alpha=0.7, s=30, zorder=5)
     ax.set_xticks(range(len(stiffnesses)))
     ax.set_xticklabels([f'{s:.0f}' for s in stiffnesses], rotation=45)
     ax.set_xlabel(f'{PARAM_NAME} ({PARAM_UNIT})')
@@ -99,7 +95,6 @@ def plot_circularity_summary(circ_results, plots_dir, model_type):
 
     fig.tight_layout()
     path = os.path.join(plots_dir, f'{prefix}_circularity_day{day:.0f}.png')
-    fig.savefig(path, bbox_inches='tight')
     svg_path = os.path.splitext(path)[0] + '.svg'
     fig.savefig(svg_path, format='svg', bbox_inches='tight')
     plt.close(fig)
@@ -171,11 +166,6 @@ def plot_crypt_counts(crypt_results, plots_dir, model_type):
     for i, patch in enumerate(bp['boxes']):
         patch.set_facecolor(colours[stiffnesses[i]])
         patch.set_alpha(0.4)
-    for i, (s, data) in enumerate(zip(stiffnesses, crypt_data)):
-        if data:
-            jitter = np.random.normal(0, 0.08, len(data))
-            ax.scatter(np.full(len(data), i) + jitter, data,
-                       color=colours[s], alpha=0.6, s=30, zorder=5)
     ax.set_xticks(range(len(stiffnesses)))
     ax.set_xticklabels([f'{s:.1f}' for s in stiffnesses], rotation=45)
     ax.set_xlabel(f'{PARAM_NAME} ({PARAM_UNIT})')
