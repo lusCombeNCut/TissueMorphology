@@ -85,7 +85,7 @@ def plot_visco_specific(sweep_data, model_type, plots_dir, base_dir):
     ax.set_title(f'{model_type}: Morphological Instability vs Relaxation Time')
     ax.set_xscale('log')
     plt.tight_layout()
-    path = os.path.join(plots_dir, f'{model_type}_instability_vs_tau.png')
+    path = os.path.join(plots_dir, f'{model_type}_instability_vs_tau.svg')
     _save_fig(path)
     plt.close()
     print(f"  Saved: {path}")
@@ -116,7 +116,7 @@ def plot_visco_specific(sweep_data, model_type, plots_dir, base_dir):
         has_data = True
         t = ghost_ts['times']
         c = colours[pval]
-        lbl = f'\u03c4={pval}'
+        lbl = f'{pval} {PARAM_UNIT}'
 
         axes[0, 0].plot(t, ghost_ts['n_nodes'], color=c, label=lbl)
         axes[0, 1].plot(t, ghost_ts['mean_density'], color=c, label=lbl)
@@ -130,28 +130,27 @@ def plot_visco_specific(sweep_data, model_type, plots_dir, base_dir):
     if has_data:
         axes[0, 0].set_ylabel('Active Ghost Nodes')
         axes[0, 0].set_title('ECM Node Count Over Time')
-        axes[0, 0].legend(fontsize='small', ncol=2)
 
         axes[0, 1].set_ylabel('Mean ECM Density')
         axes[0, 1].set_title('ECM Degradation Over Time')
-        axes[0, 1].legend(fontsize='small', ncol=2)
 
         axes[1, 0].set_xlabel('Timestep')
         axes[1, 0].set_ylabel('Mean Rest Length Strain')
         axes[1, 0].set_title('Viscoelastic Strain Relaxation')
-        axes[1, 0].legend(fontsize='small', ncol=2)
         axes[1, 0].axhline(0, color='gray', linewidth=0.5)
 
         axes[1, 1].set_xlabel('Timestep')
         axes[1, 1].set_ylabel('Mean Node Displacement (CD)')
         axes[1, 1].set_title('ECM Node Displacement')
-        axes[1, 1].legend(fontsize='small', ncol=2)
 
         for ax in axes.flat:
             ax.grid(alpha=0.3)
 
+        handles, labels = axes[0, 0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc='upper center',
+                   bbox_to_anchor=(0.5, -0.05), ncol=3, title=PARAM_NAME)
         plt.tight_layout()
-        path = os.path.join(plots_dir, f'{model_type}_ghost_node_viscoelastic.png')
+        path = os.path.join(plots_dir, f'{model_type}_ghost_node_viscoelastic.svg')
         _save_fig(path)
         print(f"  Saved: {path}")
     plt.close()
@@ -200,7 +199,7 @@ def main():
                 ('var_r', 'Final Radial Variance', 'Variance vs Relaxation Time'),
                 ('num_cells', 'Final Cell Count', 'Cell Count vs Relaxation Time'),
             ]:
-                path = os.path.join(plots_dir, f'comparison_{col}_vs_tau.png')
+                path = os.path.join(plots_dir, f'comparison_{col}_vs_tau.svg')
                 plot_multi_model_comparison(all_sweep, col, PARAM_NAME,
                     PARAM_UNIT, ylabel, title, path, logx=True)
 

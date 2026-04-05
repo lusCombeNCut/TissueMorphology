@@ -93,6 +93,19 @@ def setup_style():
     })
 
 
+def _add_legend(ax, title=None, ncol=2):
+    """Place legend below the axes with an optional title."""
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.25),
+              ncol=ncol, title=title, frameon=True)
+
+
+def _param_label(value, unit):
+    """Format a parameter value with its unit for legend entries."""
+    if unit:
+        return f'{value} {unit}'
+    return f'{value}'
+
+
 def _save_fig(output_path):
     """Save the current figure as SVG."""
     svg_path = os.path.splitext(output_path)[0] + '.svg'
@@ -645,13 +658,13 @@ def plot_timeseries_by_param(sweep_data, column, param_name, param_unit,
         if len(times) == 0:
             continue
         colour = colours[pval]
-        label = f'{param_name}={pval}'
+        label = _param_label(pval, param_unit)
         ax.plot(times, mean, color=colour, label=label)
         ax.fill_between(times, mean - std, mean + std, color=colour, alpha=0.15)
 
     ax.set_xlabel('Time (hours)')
     ax.set_ylabel(ylabel)
-    ax.legend(ncol=2, loc='best')
+    _add_legend(ax, title=param_name, ncol=2)
     plt.tight_layout()
     _save_fig(output_path)
     plt.close()
@@ -754,7 +767,7 @@ def plot_multi_model_comparison(all_sweep_data, column, param_name, param_unit,
     ax.set_ylabel(ylabel)
     if logx:
         ax.set_xscale('log')
-    ax.legend()
+    _add_legend(ax, title='Model', ncol=2)
     plt.tight_layout()
     _save_fig(output_path)
     plt.close()
@@ -832,7 +845,7 @@ def generate_standard_plots(sweep_data, param_name, param_unit, model_type,
     ]
 
     for col, ylabel, title in ts_plots:
-        path = os.path.join(plots_dir, f'{prefix}_{col}_timeseries.png')
+        path = os.path.join(plots_dir, f'{prefix}_{col}_timeseries.svg')
         plot_timeseries_by_param(sweep_data, col, param_name, param_unit,
                                  ylabel, title, path, model_type)
 
@@ -844,10 +857,10 @@ def generate_standard_plots(sweep_data, param_name, param_unit, model_type,
     ]
 
     for col, ylabel, title in summary_plots:
-        path = os.path.join(plots_dir, f'{prefix}_{col}_boxplot.png')
+        path = os.path.join(plots_dir, f'{prefix}_{col}_boxplot.svg')
         plot_final_value_boxplot(sweep_data, col, param_name, param_unit,
                                 ylabel, title, path, model_type)
-        path = os.path.join(plots_dir, f'{prefix}_{col}_vs_{param_name}.png')
+        path = os.path.join(plots_dir, f'{prefix}_{col}_vs_{param_name}.svg')
         plot_mean_vs_param(sweep_data, col, param_name, param_unit,
                            ylabel, title, path, model_type, logx=logx)
 
@@ -864,7 +877,7 @@ def generate_standard_plots(sweep_data, param_name, param_unit, model_type,
             for col, ylabel, title in [
                 ('circularity', 'Circularity', 'Circularity Over Time'),
             ]:
-                path = os.path.join(plots_dir, f'{prefix}_{col}_timeseries.png')
+                path = os.path.join(plots_dir, f'{prefix}_{col}_timeseries.svg')
                 plot_timeseries_by_param(sweep_data, col, param_name, param_unit,
                                          ylabel, title, path, model_type,
                                          time_col='_cc_time')
@@ -872,17 +885,17 @@ def generate_standard_plots(sweep_data, param_name, param_unit, model_type,
             for col, ylabel, title in [
                 ('circularity', 'Final Circularity', 'Final Circularity vs ' + param_name),
             ]:
-                path = os.path.join(plots_dir, f'{prefix}_{col}_boxplot.png')
+                path = os.path.join(plots_dir, f'{prefix}_{col}_boxplot.svg')
                 plot_final_value_boxplot(sweep_data, col, param_name, param_unit,
                                          ylabel, title, path, model_type)
-                path = os.path.join(plots_dir, f'{prefix}_{col}_vs_{param_name}.png')
+                path = os.path.join(plots_dir, f'{prefix}_{col}_vs_{param_name}.svg')
                 plot_mean_vs_param(sweep_data, col, param_name, param_unit,
                                     ylabel, title, path, model_type, logx=logx)
 
             for col, ylabel, title in [
                 ('num_crypts', 'Number of Crypts', 'Crypt Count Over Time'),
             ]:
-                path = os.path.join(plots_dir, f'{prefix}_{col}_timeseries.png')
+                path = os.path.join(plots_dir, f'{prefix}_{col}_timeseries.svg')
                 plot_timeseries_by_param(sweep_data, col, param_name, param_unit,
                                          ylabel, title, path, model_type,
                                          time_col='_cc_time')
@@ -890,10 +903,10 @@ def generate_standard_plots(sweep_data, param_name, param_unit, model_type,
             for col, ylabel, title in [
                 ('num_crypts', 'Final Crypt Count', 'Final Crypt Count vs ' + param_name),
             ]:
-                path = os.path.join(plots_dir, f'{prefix}_{col}_boxplot.png')
+                path = os.path.join(plots_dir, f'{prefix}_{col}_boxplot.svg')
                 plot_final_value_boxplot(sweep_data, col, param_name, param_unit,
                                          ylabel, title, path, model_type)
-                path = os.path.join(plots_dir, f'{prefix}_{col}_vs_{param_name}.png')
+                path = os.path.join(plots_dir, f'{prefix}_{col}_vs_{param_name}.svg')
                 plot_mean_vs_param(sweep_data, col, param_name, param_unit,
                                     ylabel, title, path, model_type, logx=logx)
 

@@ -94,7 +94,7 @@ def plot_circularity_summary(circ_results, plots_dir, model_type):
     ax2.grid(True, alpha=0.3)
 
     fig.tight_layout()
-    path = os.path.join(plots_dir, f'{prefix}_circularity_day{day:.0f}.png')
+    path = os.path.join(plots_dir, f'{prefix}_circularity_day{day:.0f}.svg')
     svg_path = os.path.splitext(path)[0] + '.svg'
     fig.savefig(svg_path, format='svg', bbox_inches='tight')
     plt.close(fig)
@@ -184,7 +184,7 @@ def plot_crypt_counts(crypt_results, plots_dir, model_type):
     ax2.set_ylim(0, 1.05)
 
     plt.tight_layout()
-    path = os.path.join(plots_dir, f'{model_type}_crypt_count_and_circularity.png')
+    path = os.path.join(plots_dir, f'{model_type}_crypt_count_and_circularity.svg')
     _save_fig(path)
     plt.close()
     print(f"  Saved: {path}")
@@ -254,13 +254,13 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
         times, fracs = compute_contact_inhibition_timeseries(data_dir)
         if len(times) > 0:
             has_ci_data = True
-            ax.plot(times, fracs, color=colours[pval], label=f'Stiffness={pval}')
+            ax.plot(times, fracs, color=colours[pval], label=f'{pval} {PARAM_UNIT}')
     if has_ci_data:
         ax.set_xlabel('Timestep')
         ax.set_ylabel('Fraction Contact Inhibited')
-        ax.legend(ncol=2)
+        _add_legend(ax, title=PARAM_NAME, ncol=2)
         plt.tight_layout()
-        path = os.path.join(plots_dir, f'{model_type}_contact_inhibition.png')
+        path = os.path.join(plots_dir, f'{model_type}_contact_inhibition.svg')
         _save_fig(path)
         print(f"  Saved: {path}")
     plt.close()
@@ -279,10 +279,10 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
                     ax.plot(ct_data['times'], ct_data[name], color=colour, label=name)
             ax.set_xlabel('Timestep')
             ax.set_ylabel('Cell Type Fraction')
-            ax.legend()
+            _add_legend(ax, title='Cell Type', ncol=2)
             ax.set_ylim(0, 1)
             plt.tight_layout()
-            path = os.path.join(plots_dir, f'{model_type}_cell_type_ratios.png')
+            path = os.path.join(plots_dir, f'{model_type}_cell_type_ratios.svg')
             _save_fig(path)
             plt.close()
             print(f"  Saved: {path}")
@@ -296,13 +296,13 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
         times, forces = compute_lumen_force_timeseries(data_dir)
         if len(times) > 0:
             has_lumen = True
-            ax.plot(times, forces, color=colours[pval], label=f'Stiffness={pval}')
+            ax.plot(times, forces, color=colours[pval], label=f'{pval} {PARAM_UNIT}')
     if has_lumen:
         ax.set_xlabel('Timestep')
         ax.set_ylabel('Mean Lumen Force Magnitude')
-        ax.legend(ncol=2)
+        _add_legend(ax, title=PARAM_NAME, ncol=2)
         plt.tight_layout()
-        path = os.path.join(plots_dir, f'{model_type}_lumen_force.png')
+        path = os.path.join(plots_dir, f'{model_type}_lumen_force.svg')
         _save_fig(path)
         print(f"  Saved: {path}")
     plt.close()
@@ -319,7 +319,7 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
         has_ghost = True
         t = ghost_ts['times']
         c = colours[pval]
-        lbl = f'S={pval}'
+        lbl = f'{pval} {PARAM_UNIT}'
         axes[0].plot(t, ghost_ts['n_nodes'], color=c, label=lbl)
         axes[1].plot(t, ghost_ts['mean_density'], color=c, label=lbl)
         if 'mean_strain' in ghost_ts:
@@ -327,13 +327,13 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
 
     if has_ghost:
         axes[0].set_xlabel('Timestep'); axes[0].set_ylabel('Active Ghost Nodes')
-        axes[0].legend(fontsize='small', ncol=2)
         axes[1].set_xlabel('Timestep'); axes[1].set_ylabel('Mean ECM Density')
-        axes[1].legend(fontsize='small', ncol=2)
         axes[2].set_xlabel('Timestep'); axes[2].set_ylabel('Mean Rest Length Strain')
-        axes[2].legend(fontsize='small', ncol=2)
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc='upper center',
+                   bbox_to_anchor=(0.5, -0.05), ncol=3, title=PARAM_NAME)
         plt.tight_layout()
-        path = os.path.join(plots_dir, f'{model_type}_ghost_node_ecm.png')
+        path = os.path.join(plots_dir, f'{model_type}_ghost_node_ecm.svg')
         _save_fig(path)
         print(f"  Saved: {path}")
     plt.close()
@@ -375,7 +375,7 @@ def main():
                 ('var_r', 'Final Radial Variance', 'Radial Variance vs ECM Stiffness'),
                 ('r_range', 'Final Radial Range (CD)', 'Budding Amplitude vs ECM Stiffness'),
             ]:
-                path = os.path.join(plots_dir, f'comparison_{col}_vs_stiffness.png')
+                path = os.path.join(plots_dir, f'comparison_{col}_vs_stiffness.svg')
                 plot_multi_model_comparison(all_sweep, col, PARAM_NAME, PARAM_UNIT,
                                            ylabel, title, path, logx=True)
 

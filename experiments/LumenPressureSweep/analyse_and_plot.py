@@ -166,14 +166,14 @@ def plot_pressure_specific(sweep_data, model_type, plots_dir, L0_um):
                 kernel = np.ones(5) / 5
                 growth_rate = np.convolve(growth_rate, kernel, mode='same')
             ax.plot(mid_times, growth_rate, color=colours[pval],
-                    label=f'P={pval} Pa')
+                    label=f'{pval} {PARAM_UNIT}')
     ax.set_xlabel('Time (hours)')
     ax.set_ylabel('Radial Growth Rate (\u00b5m/h)')
     ax.set_title(f'{model_type}: Radial Growth Rate vs Lumen Pressure')
-    ax.legend(ncol=2)
+    _add_legend(ax, title=PARAM_NAME, ncol=2)
     ax.axhline(0, color='gray', linewidth=0.5)
     plt.tight_layout()
-    path = os.path.join(plots_dir, f'{model_type}_growth_rate.png')
+    path = os.path.join(plots_dir, f'{model_type}_growth_rate.svg')
     _save_fig(path)
     plt.close()
     print(f"  Saved: {path}")
@@ -192,15 +192,15 @@ def plot_pressure_specific(sweep_data, model_type, plots_dir, L0_um):
         if ratio_runs:
             times, mean, std, n = aggregate_timeseries(ratio_runs, 'ratio')
             if len(times) > 0:
-                ax.plot(times, mean, color=colours[pval], label=f'P={pval} Pa')
+                ax.plot(times, mean, color=colours[pval], label=f'{pval} {PARAM_UNIT}')
                 ax.fill_between(times, mean - std, mean + std,
                                 color=colours[pval], alpha=0.15)
     ax.set_xlabel('Time (hours)')
     ax.set_ylabel('Normalised Budding Amplitude (r_range / mean_r)')
     ax.set_title(f'{model_type}: Normalised Budding vs Lumen Pressure')
-    ax.legend(ncol=2)
+    _add_legend(ax, title=PARAM_NAME, ncol=2)
     plt.tight_layout()
-    path = os.path.join(plots_dir, f'{model_type}_normalised_budding.png')
+    path = os.path.join(plots_dir, f'{model_type}_normalised_budding.svg')
     _save_fig(path)
     plt.close()
     print(f"  Saved: {path}")
@@ -250,7 +250,7 @@ def generate_standard_plots_physical(sweep_data, model_type, plots_dir, L0_um):
     ]
 
     for col, ylabel, title in ts_plots:
-        path = os.path.join(plots_dir, f'{prefix}_{col}_timeseries.png')
+        path = os.path.join(plots_dir, f'{prefix}_{col}_timeseries.svg')
         plot_timeseries_by_param(sweep_data, col, PARAM_NAME, PARAM_UNIT,
                                 ylabel, title, path, model_type)
 
@@ -266,10 +266,10 @@ def generate_standard_plots_physical(sweep_data, model_type, plots_dir, L0_um):
     ]
 
     for col, ylabel, title in summary_plots:
-        path = os.path.join(plots_dir, f'{prefix}_{col}_boxplot.png')
+        path = os.path.join(plots_dir, f'{prefix}_{col}_boxplot.svg')
         plot_final_value_boxplot(sweep_data, col, PARAM_NAME, PARAM_UNIT,
                                 ylabel, title, path, model_type)
-        path = os.path.join(plots_dir, f'{prefix}_{col}_vs_{PARAM_NAME}.png')
+        path = os.path.join(plots_dir, f'{prefix}_{col}_vs_{PARAM_NAME}.svg')
         plot_mean_vs_param(sweep_data, col, PARAM_NAME, PARAM_UNIT,
                            ylabel, title, path, model_type, logx=False)
 
@@ -287,7 +287,7 @@ def generate_standard_plots_physical(sweep_data, model_type, plots_dir, L0_um):
             for col, ylabel, title in [
                 ('circularity', 'Circularity', 'Circularity Over Time'),
             ]:
-                path = os.path.join(plots_dir, f'{prefix}_{col}_timeseries.png')
+                path = os.path.join(plots_dir, f'{prefix}_{col}_timeseries.svg')
                 plot_timeseries_by_param(sweep_data, col, PARAM_NAME,
                                         PARAM_UNIT, ylabel, title, path,
                                         model_type, time_col='_cc_time')
@@ -297,13 +297,13 @@ def generate_standard_plots_physical(sweep_data, model_type, plots_dir, L0_um):
                  'Final Circularity vs ' + PARAM_NAME),
             ]:
                 path = os.path.join(plots_dir,
-                                    f'{prefix}_{col}_boxplot.png')
+                                    f'{prefix}_{col}_boxplot.svg')
                 plot_final_value_boxplot(sweep_data, col, PARAM_NAME,
                                         PARAM_UNIT, ylabel, title, path,
                                         model_type)
                 path = os.path.join(
                     plots_dir,
-                    f'{prefix}_{col}_vs_{PARAM_NAME}.png')
+                    f'{prefix}_{col}_vs_{PARAM_NAME}.svg')
                 plot_mean_vs_param(sweep_data, col, PARAM_NAME, PARAM_UNIT,
                                    ylabel, title, path, model_type,
                                    logx=False)
@@ -312,7 +312,7 @@ def generate_standard_plots_physical(sweep_data, model_type, plots_dir, L0_um):
                 ('num_crypts', 'Number of Crypts', 'Crypt Count Over Time'),
             ]:
                 path = os.path.join(plots_dir,
-                                    f'{prefix}_{col}_timeseries.png')
+                                    f'{prefix}_{col}_timeseries.svg')
                 plot_timeseries_by_param(sweep_data, col, PARAM_NAME,
                                         PARAM_UNIT, ylabel, title, path,
                                         model_type, time_col='_cc_time')
@@ -322,13 +322,13 @@ def generate_standard_plots_physical(sweep_data, model_type, plots_dir, L0_um):
                  'Final Crypt Count vs ' + PARAM_NAME),
             ]:
                 path = os.path.join(plots_dir,
-                                    f'{prefix}_{col}_boxplot.png')
+                                    f'{prefix}_{col}_boxplot.svg')
                 plot_final_value_boxplot(sweep_data, col, PARAM_NAME,
                                         PARAM_UNIT, ylabel, title, path,
                                         model_type)
                 path = os.path.join(
                     plots_dir,
-                    f'{prefix}_{col}_vs_{PARAM_NAME}.png')
+                    f'{prefix}_{col}_vs_{PARAM_NAME}.svg')
                 plot_mean_vs_param(sweep_data, col, PARAM_NAME, PARAM_UNIT,
                                    ylabel, title, path, model_type,
                                    logx=False)
@@ -393,7 +393,7 @@ def main():
                  'Budding Amplitude vs Lumen Pressure'),
             ]:
                 path = os.path.join(plots_dir,
-                                    f'comparison_{col}_vs_pressure.png')
+                                    f'comparison_{col}_vs_pressure.svg')
                 plot_multi_model_comparison(converted_sweep, col, PARAM_NAME,
                                            PARAM_UNIT, ylabel, title, path,
                                            logx=False)

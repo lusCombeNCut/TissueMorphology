@@ -93,7 +93,7 @@ def plot_fibre_specific(sweep_data, model_type, plots_dir):
         ax.set_ylabel('Budding Onset Time (hours)')
         ax.set_title(f'{model_type}: Budding Onset vs Fibre Remodeling Rate')
         plt.tight_layout()
-        path = os.path.join(plots_dir, f'{model_type}_budding_onset.png')
+        path = os.path.join(plots_dir, f'{model_type}_budding_onset.svg')
         _save_fig(path)
         print(f"  Saved: {path}")
     plt.close()
@@ -109,7 +109,7 @@ def plot_fibre_specific(sweep_data, model_type, plots_dir):
         if final_vars and final_ranges:
             ax.scatter([np.mean(final_vars)], [np.mean(final_ranges)],
                        color=colours[pval], s=100, zorder=5,
-                       label=f'Rate={pval}')
+                       label=f'{pval} {PARAM_UNIT}')
             ax.errorbar([np.mean(final_vars)], [np.mean(final_ranges)],
                         xerr=[np.std(final_vars)], yerr=[np.std(final_ranges)],
                         color=colours[pval], capsize=3, linewidth=1)
@@ -117,9 +117,9 @@ def plot_fibre_specific(sweep_data, model_type, plots_dir):
     ax.set_xlabel('Final Radial Variance')
     ax.set_ylabel('Final Radial Range (CD)')
     ax.set_title(f'{model_type}: Morphological Deformation vs Fibre Remodeling')
-    ax.legend()
+    _add_legend(ax, title=PARAM_NAME, ncol=2)
     plt.tight_layout()
-    path = os.path.join(plots_dir, f'{model_type}_deformation_scatter.png')
+    path = os.path.join(plots_dir, f'{model_type}_deformation_scatter.svg')
     _save_fig(path)
     plt.close()
     print(f"  Saved: {path}")
@@ -167,7 +167,7 @@ def main():
                 ('r_range', 'Final Radial Range', 'Budding Amplitude vs Fibre Rate'),
                 ('var_r', 'Final Radial Variance', 'Radial Variance vs Fibre Rate'),
             ]:
-                path = os.path.join(plots_dir, f'comparison_{col}_vs_fibre_rate.png')
+                path = os.path.join(plots_dir, f'comparison_{col}_vs_fibre_rate.svg')
                 plot_multi_model_comparison(all_sweep, col, PARAM_NAME,
                     PARAM_UNIT, ylabel, title, path)
 
