@@ -84,7 +84,7 @@ def plot_visco_specific(sweep_data, model_type, plots_dir, base_dir):
     ax.set_ylabel('Final Radial Variance')
     ax.set_title(f'{model_type}: Morphological Instability vs Relaxation Time')
     ax.set_xscale('log')
-    plt.tight_layout()
+
     path = os.path.join(plots_dir, f'{model_type}_instability_vs_tau.svg')
     _save_fig(path)
     plt.close()
@@ -149,7 +149,7 @@ def plot_visco_specific(sweep_data, model_type, plots_dir, base_dir):
         handles, labels = axes[0, 0].get_legend_handles_labels()
         fig.legend(handles, labels, loc='upper center',
                    bbox_to_anchor=(0.5, -0.05), ncol=3, title=PARAM_NAME)
-        plt.tight_layout()
+    
         path = os.path.join(plots_dir, f'{model_type}_ghost_node_viscoelastic.svg')
         _save_fig(path)
         print(f"  Saved: {path}")

@@ -93,7 +93,7 @@ def plot_circularity_summary(circ_results, plots_dir, model_type):
     ax2.set_ylim(0, 1.05)
     ax2.grid(True, alpha=0.3)
 
-    fig.tight_layout()
+
     path = os.path.join(plots_dir, f'{prefix}_circularity_day{day:.0f}.svg')
     svg_path = os.path.splitext(path)[0] + '.svg'
     fig.savefig(svg_path, format='svg', bbox_inches='tight')
@@ -183,7 +183,6 @@ def plot_crypt_counts(crypt_results, plots_dir, model_type):
     ax2.set_xscale('log')
     ax2.set_ylim(0, 1.05)
 
-    plt.tight_layout()
     path = os.path.join(plots_dir, f'{model_type}_crypt_count_and_circularity.svg')
     _save_fig(path)
     plt.close()
@@ -259,7 +258,7 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
         ax.set_xlabel('Timestep')
         ax.set_ylabel('Fraction Contact Inhibited')
         _add_legend(ax, title=PARAM_NAME, ncol=2)
-        plt.tight_layout()
+
         path = os.path.join(plots_dir, f'{model_type}_contact_inhibition.svg')
         _save_fig(path)
         print(f"  Saved: {path}")
@@ -281,7 +280,7 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
             ax.set_ylabel('Cell Type Fraction')
             _add_legend(ax, title='Cell Type', ncol=2)
             ax.set_ylim(0, 1)
-            plt.tight_layout()
+    
             path = os.path.join(plots_dir, f'{model_type}_cell_type_ratios.svg')
             _save_fig(path)
             plt.close()
@@ -301,7 +300,7 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
         ax.set_xlabel('Timestep')
         ax.set_ylabel('Mean Lumen Force Magnitude')
         _add_legend(ax, title=PARAM_NAME, ncol=2)
-        plt.tight_layout()
+
         path = os.path.join(plots_dir, f'{model_type}_lumen_force.svg')
         _save_fig(path)
         print(f"  Saved: {path}")
@@ -332,7 +331,7 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
         handles, labels = axes[0].get_legend_handles_labels()
         fig.legend(handles, labels, loc='upper center',
                    bbox_to_anchor=(0.5, -0.05), ncol=3, title=PARAM_NAME)
-        plt.tight_layout()
+
         path = os.path.join(plots_dir, f'{model_type}_ghost_node_ecm.svg')
         _save_fig(path)
         print(f"  Saved: {path}")

@@ -126,7 +126,7 @@ def plot_comparison(model_data, model_type, plots_dir):
         ax.set_title(f'{model_type}: {title_suffix} — On-Lattice vs Off-Lattice')
         ax.set_xscale('log')
         _add_legend(ax, title='ECM Type', ncol=2)
-        plt.tight_layout()
+
         path = os.path.join(plots_dir, f'{model_type}_{col}_lattice_comparison.svg')
         _save_fig(path)
         plt.close()
@@ -161,8 +161,6 @@ def plot_comparison(model_data, model_type, plots_dir):
                 times, mean, std, n = aggregate_timeseries(runs, col)
                 if len(times) > 0:
                     ax.plot(times, mean, color=colour, linestyle=ls, label=label)
-                    ax.fill_between(times, mean - std, mean + std,
-                                    color=colour, alpha=0.15)
             ax.set_xlabel('Time (hours)')
             ax.set_ylabel(ylabel)
             ax.set_title(f'Stiffness = {stiff}')
@@ -171,7 +169,7 @@ def plot_comparison(model_data, model_type, plots_dir):
 
         plt.suptitle(f'{model_type}: {ylabel} Over Time — Lattice Comparison',
                      y=1.02)
-        plt.tight_layout()
+
         path = os.path.join(plots_dir,
                             f'{model_type}_{col}_timeseries_lattice_comparison.svg')
         _save_fig(path)
@@ -207,7 +205,7 @@ def plot_comparison(model_data, model_type, plots_dir):
         ax.set_title(f'{model_type}: ECM Representation Difference')
         ax.set_xscale('log')
         _add_legend(ax, title='Metric', ncol=2)
-        plt.tight_layout()
+
         path = os.path.join(plots_dir, f'{model_type}_lattice_difference.svg')
         _save_fig(path)
         plt.close()

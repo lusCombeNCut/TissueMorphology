@@ -80,6 +80,7 @@ def setup_style():
         'figure.dpi': 300,
         'savefig.dpi': 300,
         'savefig.bbox': 'tight',
+        'figure.constrained_layout.use': True,
         'font.size': 22 * s,
         'axes.titlesize': 26 * s,
         'axes.labelsize': 24 * s,
@@ -660,12 +661,10 @@ def plot_timeseries_by_param(sweep_data, column, param_name, param_unit,
         colour = colours[pval]
         label = _param_label(pval, param_unit)
         ax.plot(times, mean, color=colour, label=label)
-        ax.fill_between(times, mean - std, mean + std, color=colour, alpha=0.15)
 
     ax.set_xlabel('Time (hours)')
     ax.set_ylabel(ylabel)
     _add_legend(ax, title=param_name, ncol=2)
-    plt.tight_layout()
     _save_fig(output_path)
     plt.close()
     print(f"  Saved: {output_path}")
@@ -699,7 +698,6 @@ def plot_final_value_boxplot(sweep_data, column, param_name, param_unit,
     ax.set_xticklabels(labels, rotation=45)
     ax.set_xlabel(f'{param_name} ({param_unit})' if param_unit else param_name)
     ax.set_ylabel(ylabel)
-    plt.tight_layout()
     _save_fig(output_path)
     plt.close()
     print(f"  Saved: {output_path}")
@@ -727,7 +725,6 @@ def plot_mean_vs_param(sweep_data, column, param_name, param_unit,
     ax.set_ylabel(ylabel)
     if logx and all(v > 0 for v in param_vals):
         ax.set_xscale('log')
-    plt.tight_layout()
     _save_fig(output_path)
     plt.close()
     print(f"  Saved: {output_path}")
@@ -768,7 +765,6 @@ def plot_multi_model_comparison(all_sweep_data, column, param_name, param_unit,
     if logx:
         ax.set_xscale('log')
     _add_legend(ax, title='Model', ncol=2)
-    plt.tight_layout()
     _save_fig(output_path)
     plt.close()
     print(f"  Saved: {output_path}")

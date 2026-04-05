@@ -92,7 +92,7 @@ def plot_fibre_specific(sweep_data, model_type, plots_dir):
         ax.set_xlabel(f'{PARAM_NAME} ({PARAM_UNIT})')
         ax.set_ylabel('Budding Onset Time (hours)')
         ax.set_title(f'{model_type}: Budding Onset vs Fibre Remodeling Rate')
-        plt.tight_layout()
+
         path = os.path.join(plots_dir, f'{model_type}_budding_onset.svg')
         _save_fig(path)
         print(f"  Saved: {path}")
@@ -118,7 +118,6 @@ def plot_fibre_specific(sweep_data, model_type, plots_dir):
     ax.set_ylabel('Final Radial Range (CD)')
     ax.set_title(f'{model_type}: Morphological Deformation vs Fibre Remodeling')
     _add_legend(ax, title=PARAM_NAME, ncol=2)
-    plt.tight_layout()
     path = os.path.join(plots_dir, f'{model_type}_deformation_scatter.svg')
     _save_fig(path)
     plt.close()
