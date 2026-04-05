@@ -23,6 +23,7 @@ import glob
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analysis_utils import *
+from analysis_utils import _save_fig
 
 try:
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
@@ -152,7 +153,7 @@ def plot_pressure_specific(sweep_data, model_type, plots_dir, L0_um):
     colours = get_param_colours(param_vals)
 
     # Growth rate: derivative of mean_r (already in µm)
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=figsize())
     for pval in param_vals:
         runs = sweep_data[pval]
         times, mean, std, n = aggregate_timeseries(runs, 'mean_r')
@@ -169,16 +170,16 @@ def plot_pressure_specific(sweep_data, model_type, plots_dir, L0_um):
     ax.set_xlabel('Time (hours)')
     ax.set_ylabel('Radial Growth Rate (\u00b5m/h)')
     ax.set_title(f'{model_type}: Radial Growth Rate vs Lumen Pressure')
-    ax.legend(fontsize=8, ncol=2)
+    ax.legend(ncol=2)
     ax.axhline(0, color='gray', linewidth=0.5)
     plt.tight_layout()
     path = os.path.join(plots_dir, f'{model_type}_growth_rate.png')
-    plt.savefig(path)
+    _save_fig(path)
     plt.close()
     print(f"  Saved: {path}")
 
     # Ratio of r_range to mean_r (normalised budding amplitude, dimensionless)
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=figsize())
     for pval in param_vals:
         runs = sweep_data[pval]
         ratio_runs = []
@@ -197,10 +198,10 @@ def plot_pressure_specific(sweep_data, model_type, plots_dir, L0_um):
     ax.set_xlabel('Time (hours)')
     ax.set_ylabel('Normalised Budding Amplitude (r_range / mean_r)')
     ax.set_title(f'{model_type}: Normalised Budding vs Lumen Pressure')
-    ax.legend(fontsize=8, ncol=2)
+    ax.legend(ncol=2)
     plt.tight_layout()
     path = os.path.join(plots_dir, f'{model_type}_normalised_budding.png')
-    plt.savefig(path)
+    _save_fig(path)
     plt.close()
     print(f"  Saved: {path}")
 
@@ -350,13 +351,21 @@ def main():
                                  'all'])
     parser.add_argument('--output-dir', '-o', default=None)
     parser.add_argument('--full', action='store_true')
+    add_common_args(parser)
 
     args = parser.parse_args()
+    apply_common_args(args)
     plots_dir = args.output_dir or os.path.join(args.data_dir, 'plots')
     os.makedirs(plots_dir, exist_ok=True)
 
-    # Determine unit conversions (try reading from params.json)
-    L0_um, pressure_to_Pa = _get_conversions_from_params(args.data_dir)
+    # Determine unit conversions (CLI overrides > params.json > defaults)
+    cd = args.cell_diameter or _DEFAULT_CD_UM
+    fr = args.ref_force or _DEFAULT_F_REF_NN
+    vr = args.ref_velocity or _DEFAULT_V_REF_UM_H
+    if args.cell_diameter or args.ref_force or args.ref_velocity:
+        L0_um, pressure_to_Pa = _compute_conversions(cd, fr, vr)
+    else:
+        L0_um, pressure_to_Pa = _get_conversions_from_params(args.data_dir)
 
     models = ['node2d', 'vertex2d', 'node3d', 'vertex3d'] \
              if args.model == 'all' else [args.model]

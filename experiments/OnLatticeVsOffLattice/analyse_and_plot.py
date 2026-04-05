@@ -22,6 +22,7 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analysis_utils import *
+from analysis_utils import _save_fig
 
 PARAM_NAME = 'ECM Stiffness'
 PARAM_UNIT = ''
@@ -101,7 +102,7 @@ def plot_comparison(model_data, model_type, plots_dir):
         ('var_r', 'Final Radial Variance', 'Radial Variance'),
         ('r_range', 'Final Radial Range (CD)', 'Budding Amplitude'),
     ]:
-        fig, ax = plt.subplots(figsize=(9, 5))
+        fig, ax = plt.subplots(figsize=figsize())
 
         for ecm_type, (colour, marker, ls, label) in ecm_styles.items():
             if ecm_type not in model_data:
@@ -127,7 +128,7 @@ def plot_comparison(model_data, model_type, plots_dir):
         ax.legend()
         plt.tight_layout()
         path = os.path.join(plots_dir, f'{model_type}_{col}_lattice_comparison.png')
-        plt.savefig(path)
+        _save_fig(path)
         plt.close()
         print(f"  Saved: {path}")
 
@@ -147,7 +148,7 @@ def plot_comparison(model_data, model_type, plots_dir):
 
     for col, ylabel in [('mean_r', 'Mean Radius (CD)'),
                         ('r_range', 'Radial Range (CD)')]:
-        fig, axes = plt.subplots(1, len(selected), figsize=(5 * len(selected), 4),
+        fig, axes = plt.subplots(1, len(selected), figsize=figsize(len(selected), 1),
                                  squeeze=False)
         for idx, stiff in enumerate(selected):
             ax = axes[0, idx]
@@ -166,20 +167,20 @@ def plot_comparison(model_data, model_type, plots_dir):
             ax.set_ylabel(ylabel)
             ax.set_title(f'Stiffness = {stiff}')
             if idx == 0:
-                ax.legend(fontsize=8)
+                ax.legend()
 
         plt.suptitle(f'{model_type}: {ylabel} Over Time — Lattice Comparison',
-                     fontsize=13, y=1.02)
+                     y=1.02)
         plt.tight_layout()
         path = os.path.join(plots_dir,
                             f'{model_type}_{col}_timeseries_lattice_comparison.png')
-        plt.savefig(path)
+        _save_fig(path)
         plt.close()
         print(f"  Saved: {path}")
 
     # 3. Difference plot: off-lattice minus on-lattice
     if 'on-lattice' in model_data and 'off-lattice' in model_data:
-        fig, ax = plt.subplots(figsize=(8, 5))
+        fig, ax = plt.subplots(figsize=figsize())
         common_stiff = sorted(set(model_data['on-lattice'].keys()) &
                               set(model_data['off-lattice'].keys()))
         for col, colour, label in [
@@ -208,7 +209,7 @@ def plot_comparison(model_data, model_type, plots_dir):
         ax.legend()
         plt.tight_layout()
         path = os.path.join(plots_dir, f'{model_type}_lattice_difference.png')
-        plt.savefig(path)
+        _save_fig(path)
         plt.close()
         print(f"  Saved: {path}")
 
@@ -240,7 +241,9 @@ def main():
     parser.add_argument('--model', default='all',
                         choices=['node2d', 'vertex2d', 'node3d', 'vertex3d', 'all'])
     parser.add_argument('--output-dir', '-o', default=None)
+    add_common_args(parser)
     args = parser.parse_args()
+    apply_common_args(args)
 
     plots_dir = args.output_dir or os.path.join(args.data_dir, 'plots')
     os.makedirs(plots_dir, exist_ok=True)

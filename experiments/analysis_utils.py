@@ -9,6 +9,7 @@ import json
 import csv
 from collections import defaultdict
 
+import argparse
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -17,6 +18,16 @@ from matplotlib.ticker import MaxNLocator
 import matplotlib.cm as cm
 
 HAS_MATPLOTLIB = True
+
+# Default plot geometry (A4, 1-inch margins, 2 columns)
+DEFAULT_FIG_WIDTH = 3.15   # inches
+DEFAULT_FIG_HEIGHT = 2.4   # inches
+DEFAULT_FONT_SCALE = 1.0
+
+# Mutable globals set by add_common_args / apply_common_args
+_FIG_W = DEFAULT_FIG_WIDTH
+_FIG_H = DEFAULT_FIG_HEIGHT
+_FONT_SCALE = DEFAULT_FONT_SCALE
 
 _crypt_count_mod = None
 for _subdir in ['ECMStiffnessSweep', 'CryptBudding', '.']:
@@ -27,25 +38,66 @@ for _subdir in ['ECMStiffnessSweep', 'CryptBudding', '.']:
         break
 
 
+def add_common_args(parser):
+    """Add shared CLI arguments for figure sizing, font scaling, and units."""
+    g = parser.add_argument_group('Plot formatting')
+    g.add_argument('--fig-width', type=float, default=DEFAULT_FIG_WIDTH,
+                   help='Figure width in inches (default: %(default)s)')
+    g.add_argument('--fig-height', type=float, default=DEFAULT_FIG_HEIGHT,
+                   help='Figure height in inches (default: %(default)s)')
+    g.add_argument('--font-scale', type=float, default=DEFAULT_FONT_SCALE,
+                   help='Multiply all font sizes by this factor (default: %(default)s)')
+
+    u = parser.add_argument_group('Unit conversion overrides')
+    u.add_argument('--cell-diameter', type=float, default=None,
+                   help='Cell diameter in µm (overrides params.json)')
+    u.add_argument('--ref-force', type=float, default=None,
+                   help='Reference force in nN (overrides params.json)')
+    u.add_argument('--ref-velocity', type=float, default=None,
+                   help='Reference velocity in µm/h (overrides params.json)')
+    return parser
+
+
+def apply_common_args(args):
+    """Apply shared CLI arguments to global plot settings."""
+    global _FIG_W, _FIG_H, _FONT_SCALE
+    _FIG_W = args.fig_width
+    _FIG_H = args.fig_height
+    _FONT_SCALE = args.font_scale
+
+
+def figsize(w_scale=1.0, h_scale=1.0):
+    """Return (width, height) tuple scaled from the global defaults."""
+    return (_FIG_W * w_scale, _FIG_H * h_scale)
+
+
 def setup_style():
     """Configure consistent plot aesthetics."""
+    s = _FONT_SCALE
     plt.rcParams.update({
         'font.family': 'serif',
         'mathtext.fontset': 'dejavuserif',
-        'figure.dpi': 150,
-        'savefig.dpi': 150,
+        'figure.dpi': 300,
+        'savefig.dpi': 300,
         'savefig.bbox': 'tight',
-        'font.size': 11,
-        'axes.titlesize': 13,
-        'axes.labelsize': 12,
-        'legend.fontsize': 10,
-        'xtick.labelsize': 10,
-        'ytick.labelsize': 10,
+        'font.size': 22 * s,
+        'axes.titlesize': 26 * s,
+        'axes.labelsize': 24 * s,
+        'legend.fontsize': 20 * s,
+        'xtick.labelsize': 20 * s,
+        'ytick.labelsize': 20 * s,
         'lines.linewidth': 1.8,
         'lines.markersize': 5,
         'axes.grid': True,
         'grid.alpha': 0.3,
     })
+
+
+def _save_fig(output_path):
+    """Save the current figure as both PNG and SVG."""
+    plt.savefig(output_path)
+    svg_path = os.path.splitext(output_path)[0] + '.svg'
+    plt.savefig(svg_path, format='svg')
 
 
 def get_param_colours(param_values):
@@ -587,7 +639,7 @@ def plot_timeseries_by_param(sweep_data, column, param_name, param_unit,
     param_vals = sorted(sweep_data.keys())
     colours = get_param_colours(param_vals)
 
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=figsize())
     for pval in param_vals:
         runs = sweep_data[pval]
         times, mean, std, n = aggregate_timeseries(runs, column, time_col=time_col)
@@ -600,9 +652,9 @@ def plot_timeseries_by_param(sweep_data, column, param_name, param_unit,
 
     ax.set_xlabel('Time (hours)')
     ax.set_ylabel(ylabel)
-    ax.legend(fontsize=8, ncol=2, loc='best')
+    ax.legend(ncol=2, loc='best')
     plt.tight_layout()
-    plt.savefig(output_path)
+    _save_fig(output_path)
     plt.close()
     print(f"  Saved: {output_path}")
 
@@ -623,7 +675,7 @@ def plot_final_value_boxplot(sweep_data, column, param_name, param_unit,
         labels.append(f'{pval}')
 
     box_colour = 'steelblue'
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=figsize())
     bp = ax.boxplot(final_values, positions=range(len(param_vals)),
                     widths=0.5, patch_artist=True,
                     medianprops=dict(color='black', linewidth=2))
@@ -642,7 +694,7 @@ def plot_final_value_boxplot(sweep_data, column, param_name, param_unit,
     ax.set_xlabel(f'{param_name} ({param_unit})' if param_unit else param_name)
     ax.set_ylabel(ylabel)
     plt.tight_layout()
-    plt.savefig(output_path)
+    _save_fig(output_path)
     plt.close()
     print(f"  Saved: {output_path}")
 
@@ -662,7 +714,7 @@ def plot_mean_vs_param(sweep_data, column, param_name, param_unit,
         means.append(np.mean(vals) if vals else np.nan)
         stds.append(np.std(vals) if vals else np.nan)
 
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=figsize())
     ax.errorbar(param_vals, means, yerr=stds, fmt='o-', capsize=5,
                 markersize=8, linewidth=2, color='steelblue')
     ax.set_xlabel(f'{param_name} ({param_unit})' if param_unit else param_name)
@@ -670,7 +722,7 @@ def plot_mean_vs_param(sweep_data, column, param_name, param_unit,
     if logx and all(v > 0 for v in param_vals):
         ax.set_xscale('log')
     plt.tight_layout()
-    plt.savefig(output_path)
+    _save_fig(output_path)
     plt.close()
     print(f"  Saved: {output_path}")
 
@@ -686,7 +738,7 @@ def plot_multi_model_comparison(all_sweep_data, column, param_name, param_unit,
         'vertex3d': ('orchid',    'D', '--'),
     }
 
-    fig, ax = plt.subplots(figsize=(9, 5))
+    fig, ax = plt.subplots(figsize=figsize())
     for model, sweep_data in sorted(all_sweep_data.items()):
         colour, marker, ls = model_styles.get(model, ('gray', 'x', ':'))
         param_vals = sorted(sweep_data.keys())
@@ -711,7 +763,7 @@ def plot_multi_model_comparison(all_sweep_data, column, param_name, param_unit,
         ax.set_xscale('log')
     ax.legend()
     plt.tight_layout()
-    plt.savefig(output_path)
+    _save_fig(output_path)
     plt.close()
     print(f"  Saved: {output_path}")
 

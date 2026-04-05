@@ -5,6 +5,7 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analysis_utils import *
+from analysis_utils import _save_fig
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from simple_crypt_count import (count_crypts_simple_method, load_final_outline,
@@ -65,7 +66,7 @@ def plot_circularity_summary(circ_results, plots_dir, model_type):
     day = TARGET_CIRCULARITY_TIME_H / 24.0
     colours = get_param_colours(stiffnesses)
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig, axes = plt.subplots(1, 2, figsize=figsize(2, 1))
 
     ax = axes[0]
     data = [circ_results[s] for s in stiffnesses]
@@ -98,7 +99,9 @@ def plot_circularity_summary(circ_results, plots_dir, model_type):
 
     fig.tight_layout()
     path = os.path.join(plots_dir, f'{prefix}_circularity_day{day:.0f}.png')
-    fig.savefig(path, dpi=150, bbox_inches='tight')
+    fig.savefig(path, bbox_inches='tight')
+    svg_path = os.path.splitext(path)[0] + '.svg'
+    fig.savefig(svg_path, format='svg', bbox_inches='tight')
     plt.close(fig)
     print(f"  Saved: {path}")
 
@@ -156,7 +159,7 @@ def plot_crypt_counts(crypt_results, plots_dir, model_type):
     setup_style()
     stiffnesses = sorted(crypt_results.keys())
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig, axes = plt.subplots(1, 2, figsize=figsize(2, 1))
 
     ax = axes[0]
     crypt_data = [[nc for nc, _ in crypt_results[s]] for s in stiffnesses]
@@ -192,7 +195,7 @@ def plot_crypt_counts(crypt_results, plots_dir, model_type):
 
     plt.tight_layout()
     path = os.path.join(plots_dir, f'{model_type}_crypt_count_and_circularity.png')
-    plt.savefig(path)
+    _save_fig(path)
     plt.close()
     print(f"  Saved: {path}")
 
@@ -252,7 +255,7 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
         if stiffness not in first_run_dirs:
             first_run_dirs[stiffness] = os.path.dirname(csv_path)
 
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=figsize())
     has_ci_data = False
     for pval in param_vals:
         if pval not in first_run_dirs:
@@ -265,10 +268,10 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
     if has_ci_data:
         ax.set_xlabel('Timestep')
         ax.set_ylabel('Fraction Contact Inhibited')
-        ax.legend(fontsize=8, ncol=2)
+        ax.legend(ncol=2)
         plt.tight_layout()
         path = os.path.join(plots_dir, f'{model_type}_contact_inhibition.png')
-        plt.savefig(path)
+        _save_fig(path)
         print(f"  Saved: {path}")
     plt.close()
 
@@ -278,7 +281,7 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
         data_dir = first_run_dirs[mid_stiffness]
         ct_data = compute_cell_type_timeseries(data_dir)
         if 'times' in ct_data and len(ct_data['times']) > 0:
-            fig, ax = plt.subplots(figsize=(10, 5))
+            fig, ax = plt.subplots(figsize=figsize())
             type_colours = {'Stem': 'green', 'Transit': 'blue',
                             'Paneth': 'red', 'Enterocyte': 'purple'}
             for name, colour in type_colours.items():
@@ -290,11 +293,11 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
             ax.set_ylim(0, 1)
             plt.tight_layout()
             path = os.path.join(plots_dir, f'{model_type}_cell_type_ratios.png')
-            plt.savefig(path)
+            _save_fig(path)
             plt.close()
             print(f"  Saved: {path}")
 
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=figsize())
     has_lumen = False
     for pval in param_vals:
         if pval not in first_run_dirs:
@@ -307,14 +310,14 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
     if has_lumen:
         ax.set_xlabel('Timestep')
         ax.set_ylabel('Mean Lumen Force Magnitude')
-        ax.legend(fontsize=8, ncol=2)
+        ax.legend(ncol=2)
         plt.tight_layout()
         path = os.path.join(plots_dir, f'{model_type}_lumen_force.png')
-        plt.savefig(path)
+        _save_fig(path)
         print(f"  Saved: {path}")
     plt.close()
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig, axes = plt.subplots(1, 3, figsize=figsize(3, 1))
     has_ghost = False
     for pval in param_vals:
         if pval not in first_run_dirs:
@@ -334,14 +337,14 @@ def analyse_vtu_data(base_dir, model_type, sweep_data, plots_dir):
 
     if has_ghost:
         axes[0].set_xlabel('Timestep'); axes[0].set_ylabel('Active Ghost Nodes')
-        axes[0].legend(fontsize=7, ncol=2)
+        axes[0].legend(fontsize='small', ncol=2)
         axes[1].set_xlabel('Timestep'); axes[1].set_ylabel('Mean ECM Density')
-        axes[1].legend(fontsize=7, ncol=2)
+        axes[1].legend(fontsize='small', ncol=2)
         axes[2].set_xlabel('Timestep'); axes[2].set_ylabel('Mean Rest Length Strain')
-        axes[2].legend(fontsize=7, ncol=2)
+        axes[2].legend(fontsize='small', ncol=2)
         plt.tight_layout()
         path = os.path.join(plots_dir, f'{model_type}_ghost_node_ecm.png')
-        plt.savefig(path)
+        _save_fig(path)
         print(f"  Saved: {path}")
     plt.close()
 
@@ -355,8 +358,10 @@ def main():
     parser.add_argument('--output-dir', '-o', default=None)
     parser.add_argument('--full', action='store_true')
     parser.add_argument('--no-crypt-count', action='store_true')
+    add_common_args(parser)
 
     args = parser.parse_args()
+    apply_common_args(args)
 
     plots_dir = args.output_dir or os.path.join(args.data_dir, 'plots')
     os.makedirs(plots_dir, exist_ok=True)

@@ -20,6 +20,7 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analysis_utils import *
+from analysis_utils import _save_fig
 
 PARAM_NAME = 'Relaxation Time'
 PARAM_UNIT = 'hours'
@@ -67,7 +68,7 @@ def plot_visco_specific(sweep_data, model_type, plots_dir, base_dir):
     colours = get_param_colours(param_vals)
 
     # Phase diagram: final var_r vs tau (log scale)
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=figsize())
     for pval in param_vals:
         runs = sweep_data[pval]
         final_vars = [d['var_r'][-1] for _, d in runs
@@ -85,7 +86,7 @@ def plot_visco_specific(sweep_data, model_type, plots_dir, base_dir):
     ax.set_xscale('log')
     plt.tight_layout()
     path = os.path.join(plots_dir, f'{model_type}_instability_vs_tau.png')
-    plt.savefig(path)
+    _save_fig(path)
     plt.close()
     print(f"  Saved: {path}")
 
@@ -102,7 +103,7 @@ def plot_visco_specific(sweep_data, model_type, plots_dir, base_dir):
             first_run_dirs[tau] = os.path.dirname(csv_path)
 
     # Ghost node plots: strain, density, node count
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig, axes = plt.subplots(2, 2, figsize=figsize(2, 2))
     has_data = False
 
     for pval in param_vals:
@@ -129,29 +130,29 @@ def plot_visco_specific(sweep_data, model_type, plots_dir, base_dir):
     if has_data:
         axes[0, 0].set_ylabel('Active Ghost Nodes')
         axes[0, 0].set_title('ECM Node Count Over Time')
-        axes[0, 0].legend(fontsize=7, ncol=2)
+        axes[0, 0].legend(fontsize='small', ncol=2)
 
         axes[0, 1].set_ylabel('Mean ECM Density')
         axes[0, 1].set_title('ECM Degradation Over Time')
-        axes[0, 1].legend(fontsize=7, ncol=2)
+        axes[0, 1].legend(fontsize='small', ncol=2)
 
         axes[1, 0].set_xlabel('Timestep')
         axes[1, 0].set_ylabel('Mean Rest Length Strain')
         axes[1, 0].set_title('Viscoelastic Strain Relaxation')
-        axes[1, 0].legend(fontsize=7, ncol=2)
+        axes[1, 0].legend(fontsize='small', ncol=2)
         axes[1, 0].axhline(0, color='gray', linewidth=0.5)
 
         axes[1, 1].set_xlabel('Timestep')
         axes[1, 1].set_ylabel('Mean Node Displacement (CD)')
         axes[1, 1].set_title('ECM Node Displacement')
-        axes[1, 1].legend(fontsize=7, ncol=2)
+        axes[1, 1].legend(fontsize='small', ncol=2)
 
         for ax in axes.flat:
             ax.grid(alpha=0.3)
 
         plt.tight_layout()
         path = os.path.join(plots_dir, f'{model_type}_ghost_node_viscoelastic.png')
-        plt.savefig(path)
+        _save_fig(path)
         print(f"  Saved: {path}")
     plt.close()
 
@@ -179,7 +180,9 @@ def main():
                         choices=['node2d', 'vertex2d', 'node3d', 'vertex3d', 'all'])
     parser.add_argument('--output-dir', '-o', default=None)
     parser.add_argument('--full', action='store_true')
+    add_common_args(parser)
     args = parser.parse_args()
+    apply_common_args(args)
 
     plots_dir = args.output_dir or os.path.join(args.data_dir, 'plots')
     os.makedirs(plots_dir, exist_ok=True)

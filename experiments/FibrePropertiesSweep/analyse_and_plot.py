@@ -18,6 +18,7 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analysis_utils import *
+from analysis_utils import _save_fig
 
 PARAM_NAME = 'Fibre Remodel Rate'
 PARAM_UNIT = 'h\u207b\u00b9'
@@ -65,7 +66,7 @@ def plot_fibre_specific(sweep_data, model_type, plots_dir):
     colours = get_param_colours(param_vals)
 
     # Variance onset time: time at which var_r first exceeds 2x initial value
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=figsize())
     onset_times = []
     for pval in param_vals:
         runs = sweep_data[pval]
@@ -93,12 +94,12 @@ def plot_fibre_specific(sweep_data, model_type, plots_dir):
         ax.set_title(f'{model_type}: Budding Onset vs Fibre Remodeling Rate')
         plt.tight_layout()
         path = os.path.join(plots_dir, f'{model_type}_budding_onset.png')
-        plt.savefig(path)
+        _save_fig(path)
         print(f"  Saved: {path}")
     plt.close()
 
     # ECM anisotropy effect: var_r at final time vs fibre rate
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=figsize())
     for pval in param_vals:
         runs = sweep_data[pval]
         final_vars = [d['var_r'][-1] for _, d in runs
@@ -116,10 +117,10 @@ def plot_fibre_specific(sweep_data, model_type, plots_dir):
     ax.set_xlabel('Final Radial Variance')
     ax.set_ylabel('Final Radial Range (CD)')
     ax.set_title(f'{model_type}: Morphological Deformation vs Fibre Remodeling')
-    ax.legend(fontsize=8)
+    ax.legend()
     plt.tight_layout()
     path = os.path.join(plots_dir, f'{model_type}_deformation_scatter.png')
-    plt.savefig(path)
+    _save_fig(path)
     plt.close()
     print(f"  Saved: {path}")
 
@@ -147,7 +148,9 @@ def main():
                         choices=['node2d', 'vertex2d', 'node3d', 'vertex3d', 'all'])
     parser.add_argument('--output-dir', '-o', default=None)
     parser.add_argument('--full', action='store_true')
+    add_common_args(parser)
     args = parser.parse_args()
+    apply_common_args(args)
 
     plots_dir = args.output_dir or os.path.join(args.data_dir, 'plots')
     os.makedirs(plots_dir, exist_ok=True)
