@@ -283,7 +283,7 @@ MODIFIED_CONFIG="${OUTPUT_DIR}/params_modified.json"
 
 python3 -c "
 import json
-with open('${HOST_CONFIG_PATH}') as f:
+with open('${HOST_CONFIG_PATH}', encoding='utf-8') as f:
     cfg = json.load(f)
 
 ecm_type = '${ECM_TYPE}'
@@ -307,7 +307,7 @@ else:
 cfg['simulation']['ecmType'] = ecm_type
 cfg['simulation']['runNumber'] = ${RUN_NUMBER}
 
-with open('${MODIFIED_CONFIG}', 'w') as f:
+with open('${MODIFIED_CONFIG}', 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2)
 print('Config: ecmType=${ECM_TYPE}, stiffness=${ECM_STIFFNESS}')
 " || { echo "ERROR: Config generation failed"; exit 1; }

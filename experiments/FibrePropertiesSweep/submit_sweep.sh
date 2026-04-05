@@ -276,11 +276,11 @@ MODIFIED_CONFIG="${OUTPUT_DIR}/params_modified.json"
 
 python3 -c "
 import json, sys
-with open('${HOST_CONFIG_PATH}') as f:
+with open('${HOST_CONFIG_PATH}', encoding='utf-8') as f:
     cfg = json.load(f)
 cfg['forces']['GhostNodeECM']['fibreRemodelingRate'] = ${FIBRE_RATE}
 cfg['simulation']['runNumber'] = ${RUN_NUMBER}
-with open('${MODIFIED_CONFIG}', 'w') as f:
+with open('${MODIFIED_CONFIG}', 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2)
 print('Modified config: fibreRemodelingRate=${FIBRE_RATE}')
 " || { echo "ERROR: Failed to generate modified config"; exit 1; }

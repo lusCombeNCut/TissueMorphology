@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import matplotlib.cm as cm
 
+HAS_MATPLOTLIB = True
+
 _crypt_count_mod = None
 for _subdir in ['ECMStiffnessSweep', 'CryptBudding', '.']:
     _candidate = os.path.join(os.path.dirname(os.path.abspath(__file__)), _subdir)

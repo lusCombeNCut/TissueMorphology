@@ -983,6 +983,7 @@ private:
         getUnsigned("ghostRemovalCheckInterval", ghostRemovalCheckInterval);
 
         // ── Viscoelastic ECM ─────────────────────────────────────────
+        getDouble("ecmShearModulusPa", ecmShearModulusPa);
         getDouble("ghostE0", ghostE0);
         getDouble("ghostE1", ghostE1);
         getDouble("ghostRelaxationTime", ghostRelaxationTime);

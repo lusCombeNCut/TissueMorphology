@@ -138,7 +138,8 @@
       "ghostGridSpacing": -1.0,
       "ghostRemovalCheckInterval": 100,
       "ViscoelasticECM": {
-        "_comment": "SLS model: E(t) = E0 + E1*exp(-t/tau). Defaults match C++ source defaults.",
+        "_comment": "SLS model: E(t) = E0 + E1*exp(-t/tau). ecmShearModulusPa overrides ghostE0/E1 via Finalise().",
+        "ecmShearModulusPa": 800.0,
         "ghostE0": 5.0,
         "ghostE1": 1.0,
         "ghostRelaxationTime": 1.0
