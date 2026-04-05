@@ -611,7 +611,6 @@ def plot_final_value_boxplot(sweep_data, column, param_name, param_unit,
                              ylabel, title, output_path, model_type=None):
     """Box plot of the final value of a column across replicates, per parameter."""
     param_vals = sorted(sweep_data.keys())
-    colours = get_param_colours(param_vals)
 
     final_values = []
     labels = []
@@ -623,19 +622,20 @@ def plot_final_value_boxplot(sweep_data, column, param_name, param_unit,
         final_values.append(vals)
         labels.append(f'{pval}')
 
+    box_colour = 'steelblue'
     fig, ax = plt.subplots(figsize=(10, 5))
     bp = ax.boxplot(final_values, positions=range(len(param_vals)),
                     widths=0.5, patch_artist=True,
                     medianprops=dict(color='black', linewidth=2))
-    for i, patch in enumerate(bp['boxes']):
-        patch.set_facecolor(colours[param_vals[i]])
+    for patch in bp['boxes']:
+        patch.set_facecolor(box_colour)
         patch.set_alpha(0.4)
 
     for i, (pval, vals) in enumerate(zip(param_vals, final_values)):
         if vals:
             jitter = np.random.normal(0, 0.08, len(vals))
             ax.scatter(np.full(len(vals), i) + jitter, vals,
-                       color=colours[pval], alpha=0.6, s=30, zorder=5)
+                       color=box_colour, alpha=0.6, s=30, zorder=5)
 
     ax.set_xticks(range(len(param_vals)))
     ax.set_xticklabels(labels, rotation=45)

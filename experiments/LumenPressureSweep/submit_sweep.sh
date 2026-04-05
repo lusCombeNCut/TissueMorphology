@@ -237,7 +237,7 @@ if [ "${SWEEP_PHASE}" = "analyse" ]; then
             ln -sf "${SIM_OUTPUT_BASE}/${tag}" "${MERGED_DIR}/${tag}"
     done
 
-    module load languages/python 2>/dev/null || module load python 2>/dev/null || true
+    module load languages/anaconda3 2>/dev/null || module load languages/python 2>/dev/null || module load python 2>/dev/null || true
 
     SCRIPT_DIR="${SOURCE_DIR}/experiments/LumenPressureSweep"
 
