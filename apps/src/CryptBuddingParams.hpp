@@ -622,20 +622,23 @@ struct CryptBuddingParams
         }
 
         // ── Shear modulus → SLS stiffness derivation ─────────────────
-        // When ecmShearModulusPa is set, derive ghostE0 and ghostE1 from
-        // the shear modulus using the formula
-        // from visco_unit_convert.py (Fertala et al., 2025):
-        //   E0 = G * 2.9 * Δx / r,   E1 = r * E0
-        // where r = E1/E0 = 0.05 (SLS arm ratio) and Δx = ghost spacing (physical).
+        // Cauchy-Born lattice elasticity for the 8-connected square (2D) or
+        // 18-connected cubic (3D) ghost node network gives:
+        //   G = k_bond / Δx   (both lattice types)
+        // where k_bond is the spring constant per bond (N/m) and Δx is the
+        // physical ghost spacing.  E0 is the relaxed (long-time) bond stiffness,
+        // so the relaxed shear modulus is G_relax = E0_phys / Δx, giving:
+        //   E0_phys = G * Δx
+        //   E1_phys = SLS_ARM_RATIO * E0_phys
+        // The Poisson ratio of these lattices is ν = 1/3 (Cauchy relation).
         if (ecmShearModulusPa > 0.0)
         {
-            const double SLS_ARM_RATIO = 0.05;       // E1/E0 from Fertala et al. (2025)
-            const double GEOMETRIC_FACTOR = 2.9;     // shear modulus → 1D spring constant
+            const double SLS_ARM_RATIO = 0.2;        // E1/E0 — gives ~17% stress relaxation
             const double L0_m = cellDiameterMicrometers * 1e-6;
             const double T0 = 3600.0;
             const double ghostSpacingPhys = L0_m * ghostGridSpacing;  // physical ghost spacing
 
-            double E0_phys = ecmShearModulusPa * GEOMETRIC_FACTOR * ghostSpacingPhys / SLS_ARM_RATIO;
+            double E0_phys = ecmShearModulusPa * ghostSpacingPhys;
             double E1_phys = SLS_ARM_RATIO * E0_phys;
 
             // Convert physical N/m → sim units via kF = η_phys / T0
