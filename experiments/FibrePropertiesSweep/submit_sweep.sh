@@ -4,15 +4,15 @@
 #
 # Two-phase Slurm submission for BluePebble HPC (ACRC, University of Bristol)
 #
-# Sweeps ECM fibre remodeling rate to investigate how fibre dynamics affect
-# crypt budding morphology. Higher remodeling rates mean faster fibre
-# alignment with cell traction forces.
+# Sweeps ECM fibre anisotropy strength to investigate how fibre alignment
+# bias affects crypt budding morphology. Higher values impose stronger
+# directional preference on ECM fibre forces.
 #
-# Since fibreRemodelingRate has no CLI flag, we generate modified JSON configs
-# at runtime using Python.
+# Since ghostAnisotropyStrength has no CLI flag, we generate modified JSON
+# configs at runtime using Python.
 #
 # Sweep parameters:
-#   fibreRemodelingRate: 0.0, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0
+#   ghostAnisotropyStrength: 0.0, 0.1, 0.25, 0.5, 0.75, 1.0, 2.0
 #   10 replicates each = 70 tasks per model
 #
 # Phase 3 (analyse): Single job — run analysis, generate plots.
@@ -235,8 +235,8 @@ fi
 # RUN
 # #############################################################################
 
-FIBRE_REMODEL_VALUES=(0.0 0.01 0.05 0.1 0.2 0.5 1.0)
-NUM_PARAMS=${#FIBRE_REMODEL_VALUES[@]}
+ANISOTROPY_VALUES=(0.0 0.1 0.25 0.5 0.75 1.0 2.0)
+NUM_PARAMS=${#ANISOTROPY_VALUES[@]}
 NUM_REPLICATES=10
 
 PARAM_INDEX=$((SLURM_ARRAY_TASK_ID / NUM_REPLICATES))
@@ -247,7 +247,7 @@ if [ "$PARAM_INDEX" -ge "$NUM_PARAMS" ]; then
     exit 0
 fi
 
-FIBRE_RATE=${FIBRE_REMODEL_VALUES[$PARAM_INDEX]}
+ANISOTROPY=${ANISOTROPY_VALUES[$PARAM_INDEX]}
 
 case "$MODEL_TYPE" in
     node2d)   JOB_PREFIX="N2"; CONFIG_FILENAME="params-Node2d.json"   ;;
@@ -256,21 +256,21 @@ case "$MODEL_TYPE" in
     vertex3d) JOB_PREFIX="V3"; CONFIG_FILENAME="params-Vertex3d.json" ;;
 esac
 
-JOB_NAME="${JOB_PREFIX}F${FIBRE_RATE}R${RUN_NUMBER}"
+JOB_NAME="${JOB_PREFIX}A${ANISOTROPY}R${RUN_NUMBER}"
 scontrol update JobId="${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}" JobName="${JOB_NAME}"
 
 RUN_TAG="${SLURM_ARRAY_JOB_ID}_${MODEL_TYPE}_${SWEEP_TIMESTAMP}"
 LOG_DIR="${BASE_LOG_DIR}/${RUN_TAG}"
 OUTPUT_BASE="/user/work/$(whoami)/sim_output/${RUN_TAG}"
-OUTPUT_DIR="${OUTPUT_BASE}/f${FIBRE_RATE}_r${RUN_NUMBER}"
+OUTPUT_DIR="${OUTPUT_BASE}/a${ANISOTROPY}_r${RUN_NUMBER}"
 
 mkdir -p "${OUTPUT_DIR}" "${LOG_DIR}"
 
-LOG_FILE="${LOG_DIR}/f${FIBRE_RATE}_r${RUN_NUMBER}.log"
+LOG_FILE="${LOG_DIR}/a${ANISOTROPY}_r${RUN_NUMBER}.log"
 exec > >(tee -a "${LOG_FILE}")
 exec 2>&1
 
-# --- Generate modified config with fibre remodeling rate ---
+# --- Generate modified config with anisotropy strength ---
 HOST_CONFIG_PATH="${SOURCE_DIR}/apps/${CONFIG_FILENAME}"
 MODIFIED_CONFIG="${OUTPUT_DIR}/params_modified.json"
 
@@ -278,11 +278,11 @@ python3 -c "
 import json, sys
 with open('${HOST_CONFIG_PATH}', encoding='utf-8') as f:
     cfg = json.load(f)
-cfg['forces']['GhostNodeECM']['fibreRemodelingRate'] = ${FIBRE_RATE}
+cfg['forces']['GhostNodeECM']['ghostAnisotropyStrength'] = ${ANISOTROPY}
 cfg['simulation']['runNumber'] = ${RUN_NUMBER}
 with open('${MODIFIED_CONFIG}', 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2)
-print('Modified config: fibreRemodelingRate=${FIBRE_RATE}')
+print('Modified config: ghostAnisotropyStrength=${ANISOTROPY}')
 " || { echo "ERROR: Failed to generate modified config"; exit 1; }
 
 # Copy modified config into a path visible inside the container
@@ -290,10 +290,10 @@ CONTAINER_CONFIG="/home/chaste/output/params_modified.json"
 
 echo "============================================"
 echo "  Fibre Properties Sweep"
-echo "  Model:              ${MODEL_TYPE}"
-echo "  Fibre Remodel Rate: ${FIBRE_RATE}"
-echo "  Replicate:          ${RUN_NUMBER}"
-echo "  Start Time:         $(date)"
+echo "  Model:               ${MODEL_TYPE}"
+echo "  Anisotropy Strength: ${ANISOTROPY}"
+echo "  Replicate:           ${RUN_NUMBER}"
+echo "  Start Time:          $(date)"
 echo "============================================"
 
 APP_PATH="/home/chaste/build/projects/TissueMorphology/apps/CryptBuddingApp"
@@ -315,7 +315,7 @@ EXIT_CODE=$?
 
 ARCHIVE_DIR="${OUTPUT_BASE}/archives"
 mkdir -p "${ARCHIVE_DIR}"
-ARCHIVE_PATH="${ARCHIVE_DIR}/f${FIBRE_RATE}_r${RUN_NUMBER}.tar.gz"
+ARCHIVE_PATH="${ARCHIVE_DIR}/a${ANISOTROPY}_r${RUN_NUMBER}.tar.gz"
 
 if [ -d "${OUTPUT_DIR}" ] && [ "$(ls -A ${OUTPUT_DIR})" ]; then
     tar -czf "${ARCHIVE_PATH}" -C "$(dirname ${OUTPUT_DIR})" "$(basename ${OUTPUT_DIR})"

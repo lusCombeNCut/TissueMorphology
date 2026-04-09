@@ -2,9 +2,10 @@
 """
 analyse_and_plot.py — Fibre Properties Sweep
 
-Analyses how ECM fibre remodeling rate affects crypt budding morphology.
-Higher remodeling rates allow fibres to realign more quickly with cell
-traction forces, potentially facilitating or hindering bud formation.
+Analyses how ECM fibre anisotropy strength affects crypt budding morphology.
+Higher anisotropy strength imposes a stronger directional bias on ECM fibre
+forces, which may facilitate or hinder bud formation by aligning mechanical
+cues along preferred axes.
 
 Usage:
   python analyse_and_plot.py --data-dir /path/to/sim_output/<RUN_TAG>
@@ -18,11 +19,11 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analysis_utils import *
-from analysis_utils import _save_fig
+from analysis_utils import _save_fig, _add_legend
 
-PARAM_NAME = 'Fibre Remodel Rate'
-PARAM_UNIT = 'h\u207b\u00b9'
-PARAM_JSON_PATH = 'forces.GhostNodeECM.fibreRemodelingRate'
+PARAM_NAME = 'Fibre Anisotropy Strength'
+PARAM_UNIT = ''
+PARAM_JSON_PATH = 'forces.GhostNodeECM.ghostAnisotropyStrength'
 
 
 def load_fibre_sweep(base_dir, model_filter=None):
@@ -43,7 +44,7 @@ def load_fibre_sweep(base_dir, model_filter=None):
         if params:
             rate = extract_param_from_json(params, PARAM_JSON_PATH)
         if rate is None:
-            m = re.search(r'/f([\d.]+)_r(\d+)/', csv_path)
+            m = re.search(r'/a([\d.]+)_r(\d+)/', csv_path)
             if m:
                 rate = float(m.group(1))
         if rate is None:
@@ -89,9 +90,9 @@ def plot_fibre_specific(sweep_data, model_type, plots_dir):
         stds = [x[2] for x in onset_times]
         ax.errorbar(pvals, means, yerr=stds, fmt='o-', capsize=5,
                     color='steelblue', markersize=8, linewidth=2)
-        ax.set_xlabel(f'{PARAM_NAME} ({PARAM_UNIT})')
+        ax.set_xlabel(PARAM_NAME)
         ax.set_ylabel('Budding Onset Time (hours)')
-        ax.set_title(f'{model_type}: Budding Onset vs Fibre Remodeling Rate')
+        ax.set_title(f'{model_type}: Budding Onset vs Fibre Anisotropy Strength')
 
         path = os.path.join(plots_dir, f'{model_type}_budding_onset.svg')
         _save_fig(path)
@@ -109,14 +110,14 @@ def plot_fibre_specific(sweep_data, model_type, plots_dir):
         if final_vars and final_ranges:
             ax.scatter([np.mean(final_vars)], [np.mean(final_ranges)],
                        color=colours[pval], s=100, zorder=5,
-                       label=f'{pval} {PARAM_UNIT}')
+                       label=f'{pval}')
             ax.errorbar([np.mean(final_vars)], [np.mean(final_ranges)],
                         xerr=[np.std(final_vars)], yerr=[np.std(final_ranges)],
                         color=colours[pval], capsize=3, linewidth=1)
 
     ax.set_xlabel('Final Radial Variance')
     ax.set_ylabel('Final Radial Range (CD)')
-    ax.set_title(f'{model_type}: Morphological Deformation vs Fibre Remodeling')
+    ax.set_title(f'{model_type}: Morphological Deformation vs Fibre Anisotropy')
     _add_legend(ax, title=PARAM_NAME, ncol=2)
     path = os.path.join(plots_dir, f'{model_type}_deformation_scatter.svg')
     _save_fig(path)
