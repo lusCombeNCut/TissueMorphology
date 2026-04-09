@@ -10,3 +10,4 @@ Invasion/Test2dPainterReplication.hpp
 ECMForces/TestViscoelasticCompressionExperiment.hpp
 ECMForces/TestViscoelasticCompressionExperiment3d.hpp
 ECMForces/TestViscoelasticShearExperiment.hpp
+ECMForces/TestViscoelasticShearExperiment3d.hpp

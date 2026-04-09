@@ -20,8 +20,8 @@ import matplotlib.cm as cm
 HAS_MATPLOTLIB = True
 
 # Default plot geometry (A4, 1-inch margins, 2 columns)
-DEFAULT_FIG_WIDTH = 10   # inches
-DEFAULT_FIG_HEIGHT = 8   # inches
+DEFAULT_FIG_WIDTH = 7   # inches
+DEFAULT_FIG_HEIGHT = 7   # inches
 DEFAULT_FONT_SCALE = 1.0
 
 # Mutable globals set by add_common_args / apply_common_args

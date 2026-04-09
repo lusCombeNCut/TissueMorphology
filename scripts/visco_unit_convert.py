@@ -11,7 +11,3 @@ E1 = SLS_ARM_RATIO * E0
 
 print("E0 =", E0, "Pa")
 print("E1 =", E1, "Pa")
-
-# kF = eta_phys / T0
-print("-- Sim units --")
-E0_sim = 

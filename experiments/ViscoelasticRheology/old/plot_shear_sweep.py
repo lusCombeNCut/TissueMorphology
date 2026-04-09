@@ -64,7 +64,7 @@ plt.rcParams.update({
     "legend.fontsize":  10,
 })
 
-fig, ax = plt.subplots(figsize=(5, 5))
+fig, ax = plt.subplots(figsize=(3.5, 2.5))
 
 ax.plot([0, 2000], [0, 2000], "k--", lw=1, label="$y = x$")
 ax.scatter(G_target, G_relax, c="tab:blue",   s=60, zorder=3,
@@ -76,7 +76,7 @@ ax.set_ylabel("Measured $G$ (Pa)")
 ax.legend()
 ax.set_xlim(0, 2100)
 ax.set_ylim(0, 2100)
-ax.set_aspect("equal")
+# ax.set_aspect("equal")
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()

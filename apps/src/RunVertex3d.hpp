@@ -2,7 +2,12 @@
  * RunVertex3d.hpp — 3D Vertex-Based (OrganoidChaste) crypt budding model runner
  *
  * Uses the finite-thickness monolayer vertex mesh from OrganoidChaste.
- * Per-cell-type surface tensions are set via mutation states:
+ * Per-cell-type surface tensions are set via mutation states.
+ * When enableStochasticFourType=true (default):
+ *   WildType              → Stem cells (softer: gamma × gammaStemScale)
+ *   TACellMutationState   → Transit-amplifying (baseline: gamma × gammaTransitScale)
+ *   PanethCellMutationState / EnterocyteCellMutationState → Differentiated (stiffer: gamma × gammaDiffScale)
+ * Legacy fallback (enableStochasticFourType=false):
  *   WildType   → Stem cells    (softer: gamma × gammaStemScale)
  *   ApcOneHit  → Transit-amplifying (baseline: gamma × gammaTransitScale)
  *   ApcTwoHit  → Differentiated/Paneth (stiffer: gamma × gammaDiffScale)
@@ -33,6 +38,9 @@
 #include "ECMWiringHelpers.hpp"
 #include "SimulationHelpers.hpp"
 #include "WildTypeCellMutationState.hpp"
+#include "TACellMutationState.hpp"
+#include "PanethCellMutationState.hpp"
+#include "EnterocyteCellMutationState.hpp"
 #include "ApcOneHitCellMutationState.hpp"
 #include "ApcTwoHitCellMutationState.hpp"
 
@@ -103,13 +111,15 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     // ------------------------------------------------------------------
     // Cell creation with per-cell-type mutation states
     // ------------------------------------------------------------------
-    // Use different mutation states to encode cell type for SurfaceTensionForce:
-    //   WildType   = stem cells     (softer, gamma × gammaStemScale)
-    //   ApcOneHit  = transit-amplifying (baseline, gamma × gammaTransitScale)
-    //   ApcTwoHit  = differentiated/Paneth (stiffer, gamma × gammaDiffScale)
+    // Mutation state pointers — used for cell assignment and SurfaceTensionForce map.
+    // StochasticFourType path: WildType=SC, TACellMutationState=TA, Paneth/Enterocyte=Diff
+    // Legacy path:             WildType=SC, ApcOneHit=TA, ApcTwoHit=Diff
     MAKE_PTR(WildTypeCellMutationState, p_stem_mut);
-    MAKE_PTR(ApcOneHitCellMutationState, p_ta_mut);
-    MAKE_PTR(ApcTwoHitCellMutationState, p_diff_mut);
+    MAKE_PTR(TACellMutationState, p_ta_s4_mut);
+    MAKE_PTR(PanethCellMutationState, p_paneth_mut);
+    MAKE_PTR(EnterocyteCellMutationState, p_ec_mut);
+    MAKE_PTR(ApcOneHitCellMutationState, p_ta_apc_mut);
+    MAKE_PTR(ApcTwoHitCellMutationState, p_diff_apc_mut);
     MAKE_PTR(StemCellProliferativeType, p_stem);
     MAKE_PTR(TransitCellProliferativeType, p_ta);
     MAKE_PTR(DifferentiatedCellProliferativeType, p_diff);
@@ -118,41 +128,40 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
 
     for (unsigned i = 0; i < p.numCells3dVertex; i++)
     {
-        // Create cell cycle model - generational or simple based on config
         AbstractCellCycleModel* p_cycle_base = CreateCellCycleModel(p, 3, avgVol);
 
-        // Uniform random cell type assignment across the organoid surface
-        double u = RandomNumberGenerator::Instance()->ranf();
-        boost::shared_ptr<AbstractCellMutationState> p_mut;
-        boost::shared_ptr<AbstractCellProliferativeType> p_type;
-        double type_id;
+        CellPtr p_cell(new Cell(p_stem_mut, p_cycle_base));
 
-        if (u < p.stemFraction)
+        if (p.enableStochasticFourType)
         {
-            p_mut = p_stem_mut;
-            p_type = p_stem;
-            type_id = 0.0;
-        }
-        else if (u < p.stemFraction + p.transitFraction)
-        {
-            p_mut = p_ta_mut;
-            p_type = p_ta;
-            type_id = 1.0;
+            // 4-type model: WildType=SC, TACellMutationState=TA, Paneth/EC=Diff
+            AssignStochasticFourType(p_cell, p, p_stem_mut, p_ta_s4_mut, p_paneth_mut, p_ta, p_diff);
         }
         else
         {
-            p_mut = p_diff_mut;
-            p_type = p_diff;
-            type_id = 2.0;
+            // Legacy Apc-state assignment
+            double u = RandomNumberGenerator::Instance()->ranf();
+            if (u < p.stemFraction)
+            {
+                p_cell->SetCellProliferativeType(p_stem);
+                p_cell->SetMutationState(p_stem_mut);
+                p_cell->GetCellData()->SetItem("cell_type_id", 0.0);
+            }
+            else if (u < p.stemFraction + p.transitFraction)
+            {
+                p_cell->SetCellProliferativeType(p_ta);
+                p_cell->SetMutationState(p_ta_apc_mut);
+                p_cell->GetCellData()->SetItem("cell_type_id", 1.0);
+            }
+            else
+            {
+                p_cell->SetCellProliferativeType(p_diff);
+                p_cell->SetMutationState(p_diff_apc_mut);
+                p_cell->GetCellData()->SetItem("cell_type_id", 2.0);
+            }
         }
 
-        CellPtr p_cell(new Cell(p_mut, p_cycle_base));
-        p_cell->SetCellProliferativeType(p_type);
-        p_cell->GetCellData()->SetItem("cell_type_id", type_id);
-
-        // For generational model, set initial generation based on cell type
         SetInitialGeneration(p_cell, p_cycle_base, p);
-
         p_cell->SetBirthTime(-RandomNumberGenerator::Instance()->ranf() * 10.0);
         p_cell->InitialiseCellCycleModel();
         p_cell->GetCellData()->SetItem("volume", avgVol);
@@ -189,15 +198,35 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
     {
         // Per-cell-type tensions via mutation state
         std::map<boost::shared_ptr<AbstractCellMutationState>, std::array<double, 3>> mut_tension_map;
-        mut_tension_map[p_stem_mut] = {{p.gammaApical * p.gammaStemScale,
-                                        p.gammaBasal  * p.gammaStemScale,
-                                        p.gammaLateral * p.gammaStemScale}};
-        mut_tension_map[p_ta_mut]   = {{p.gammaApical * p.gammaTransitScale,
-                                        p.gammaBasal  * p.gammaTransitScale,
-                                        p.gammaLateral * p.gammaTransitScale}};
-        mut_tension_map[p_diff_mut] = {{p.gammaApical * p.gammaDiffScale,
-                                        p.gammaBasal  * p.gammaDiffScale,
-                                        p.gammaLateral * p.gammaDiffScale}};
+        if (p.enableStochasticFourType)
+        {
+            // 4-type mutation states
+            mut_tension_map[p_stem_mut]   = {{p.gammaApical * p.gammaStemScale,
+                                              p.gammaBasal  * p.gammaStemScale,
+                                              p.gammaLateral * p.gammaStemScale}};
+            mut_tension_map[p_ta_s4_mut]  = {{p.gammaApical * p.gammaTransitScale,
+                                              p.gammaBasal  * p.gammaTransitScale,
+                                              p.gammaLateral * p.gammaTransitScale}};
+            mut_tension_map[p_paneth_mut] = {{p.gammaApical * p.gammaDiffScale,
+                                              p.gammaBasal  * p.gammaDiffScale,
+                                              p.gammaLateral * p.gammaDiffScale}};
+            mut_tension_map[p_ec_mut]     = {{p.gammaApical * p.gammaDiffScale,
+                                              p.gammaBasal  * p.gammaDiffScale,
+                                              p.gammaLateral * p.gammaDiffScale}};
+        }
+        else
+        {
+            // Legacy Apc-state mapping
+            mut_tension_map[p_stem_mut]    = {{p.gammaApical * p.gammaStemScale,
+                                               p.gammaBasal  * p.gammaStemScale,
+                                               p.gammaLateral * p.gammaStemScale}};
+            mut_tension_map[p_ta_apc_mut]  = {{p.gammaApical * p.gammaTransitScale,
+                                               p.gammaBasal  * p.gammaTransitScale,
+                                               p.gammaLateral * p.gammaTransitScale}};
+            mut_tension_map[p_diff_apc_mut]= {{p.gammaApical * p.gammaDiffScale,
+                                               p.gammaBasal  * p.gammaDiffScale,
+                                               p.gammaLateral * p.gammaDiffScale}};
+        }
         p_tension->SetSurfaceTensionParametersByMutation(mut_tension_map);
         p_tension->UpdateSurfaceTensionsByMutation(&population);
 
@@ -208,7 +237,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
         std::cout << "    Transit: " << p.gammaApical * p.gammaTransitScale << ", "
                   << p.gammaBasal * p.gammaTransitScale << ", "
                   << p.gammaLateral * p.gammaTransitScale << std::endl;
-        std::cout << "    Paneth:  " << p.gammaApical * p.gammaDiffScale << ", "
+        std::cout << "    Diff:    " << p.gammaApical * p.gammaDiffScale << ", "
                   << p.gammaBasal * p.gammaDiffScale << ", "
                   << p.gammaLateral * p.gammaDiffScale << std::endl;
     }

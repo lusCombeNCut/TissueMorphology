@@ -41,6 +41,7 @@
 #include "CellVolumesWriter.hpp"
 #include "CellProliferativeTypesCountWriter.hpp"
 #include "CellContactInhibitionStatusWriter.hpp"
+#include "CellMutationStatesWriter.hpp"
 #include "CryptBuddingParams.hpp"
 #include "CryptBuddingUtils.hpp"
 #include "TimedForce.hpp"
@@ -122,6 +123,7 @@ void RunVertex2d(const CryptBuddingParams& p, const std::string& outputDir)
     population.AddCellWriter<CellAgesWriter>();
     population.AddCellWriter<CellVolumesWriter>();
     population.AddCellWriter<CellContactInhibitionStatusWriter>();
+    population.AddCellWriter<CellMutationStatesWriter>();
     population.AddCellPopulationCountWriter<CellProliferativeTypesCountWriter>();
 
     OffLatticeSimulation<2> simulator(population);
