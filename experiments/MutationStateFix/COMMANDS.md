@@ -40,8 +40,13 @@ cd /home/orlando/Thesis/sim_results && tar -xzf mutation_state_fix_<TIMESTAMP>.t
 ## 5. Analyse locally
 
 ```bash
-cd /home/orlando/Thesis/Chaste/projects/TissueMorphology/experiments
-python3 plot_cell_type_counts.py
+cd /home/orlando/Thesis/Chaste/projects/TissueMorphology/experiments/MutationStateFix
+
+# Update VERTEX_ROOT / NODE_ROOT paths in each script first, then:
+python3 MutationStateFix/plot_cell_type_counts.py
+python3 MutationStateFix/plot_quiescent_fraction.py
 ```
+
+Outputs saved to `experiments/MutationStateFix/plots/`.
 
 (Update data paths in the script to point at the new extracted results.)

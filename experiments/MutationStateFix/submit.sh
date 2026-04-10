@@ -239,13 +239,18 @@ if [ "${SWEEP_PHASE}" = "archive" ]; then
     IFS='|' read -ra RUN_TAGS <<< "${ARCHIVE_RUN_TAGS}"
     SIM_OUTPUT_BASE="/user/work/$(whoami)/sim_output"
 
-    # Merge all run directories into one clean structure
+    # Copy each model's run dirs into a per-model subdirectory to avoid
+    # vertex2d and node2d g{stiff}_r{rep} folders overwriting each other.
     for tag in "${RUN_TAGS[@]}"; do
         # tag format: <jobid>_<model>_<timestamp>
+        # extract model name from the middle segment
+        MODEL_NAME=$(echo "${tag}" | sed 's/^[0-9]*_//;s/_[0-9][0-9][0-9][0-9]-.*$//')
         SEARCH_DIR="${SIM_OUTPUT_BASE}/${tag}"
+        DEST_DIR="${ARCHIVE_OUTPUT}/${MODEL_NAME}"
         if [ -d "${SEARCH_DIR}" ]; then
-            echo "  Copying ${tag}..."
-            cp -a "${SEARCH_DIR}"/g*_r* "${ARCHIVE_OUTPUT}/" 2>/dev/null || true
+            echo "  Copying ${tag} → ${MODEL_NAME}/..."
+            mkdir -p "${DEST_DIR}"
+            cp -a "${SEARCH_DIR}"/g*_r* "${DEST_DIR}/" 2>/dev/null || true
         else
             echo "  WARNING: ${SEARCH_DIR} not found"
         fi
