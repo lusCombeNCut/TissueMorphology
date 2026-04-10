@@ -42,7 +42,7 @@
 #include "CellProliferativeTypesCountWriter.hpp"
 #include "CellPolarityWriter.hpp"
 #include "CellContactInhibitionStatusWriter.hpp"
-#include "CellMutationStatesWriter.hpp"
+#include "CellTrueMutationStateWriter.hpp"
 #include "TangentialCentreBasedDivisionRule.hpp"
 
 #include "CryptBuddingParams.hpp"
@@ -127,7 +127,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
     population.AddCellWriter<CellVolumesWriter>();
     population.AddCellWriter<CellPolarityWriter>();
     population.AddCellWriter<CellContactInhibitionStatusWriter>();
-    population.AddCellWriter<CellMutationStatesWriter>();
+    population.AddCellWriter<CellTrueMutationStateWriter>();
     population.AddCellPopulationCountWriter<CellProliferativeTypesCountWriter>();
 
     OffLatticeSimulation<2> simulator(population);
