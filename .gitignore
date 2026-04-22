@@ -37,6 +37,10 @@ __pycache__/
 # IDE / editor
 .vscode/
 .idea/
+.project
+
+# AI assistant context
+CLAUDE.md
 *.swp
 *.swo
 *~
