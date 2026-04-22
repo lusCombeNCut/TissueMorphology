@@ -42,7 +42,7 @@ from analysis_utils import setup_style, figsize
 
 # ── default paths (update after extracting the MutationStateFix archive) ─────
 # Archive structure: mutation_state_fix_<TIMESTAMP>/{vertex2d,node2d}/g{Pa}_r{rep}/...
-ARCHIVE_BASE = '/home/orlando/Thesis/sim_results/mutation_state_fix_2026-04-10_11-48-53'
+ARCHIVE_BASE = '/home/orlando/Thesis/sim_results/mutation_state_fix_2026-04-10_14-15-05'
 VERTEX_ROOT  = os.path.join(ARCHIVE_BASE, 'vertex2d')
 NODE_ROOT    = os.path.join(ARCHIVE_BASE, 'node2d')
 
@@ -242,7 +242,7 @@ def make_figure(model_label, root, node_model=False):
                bbox_to_anchor=(0.5, -0.18), ncol=4, frameon=True,
                fontsize=plt.rcParams['legend.fontsize'])
 
-    fig.suptitle(f'Per-cell-type quiescent fraction — {model_label}', y=1.02)
+    # fig.suptitle(f'Per-cell-type quiescent fraction — {model_label}', y=1.02)
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     stem = f'{model_label.lower().replace(" ", "_")}_quiescent_fraction'

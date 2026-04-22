@@ -81,6 +81,7 @@ inline void AssignStochasticFourType(
     boost::shared_ptr<AbstractCellMutationState> pWildType,
     boost::shared_ptr<AbstractCellMutationState> pTaMut,
     boost::shared_ptr<AbstractCellMutationState> pPanethMut,
+    boost::shared_ptr<AbstractCellMutationState> pEcMut,
     boost::shared_ptr<AbstractCellProliferativeType> pTransit,
     boost::shared_ptr<AbstractCellProliferativeType> pDiff)
 {
@@ -106,7 +107,8 @@ inline void AssignStochasticFourType(
     else
     {
         pCell->SetCellProliferativeType(pDiff);
-        pCell->GetCellData()->SetItem("cell_type_id", 2.0);
+        pCell->SetMutationState(pEcMut);
+        pCell->GetCellData()->SetItem("cell_type_id", 3.0);
     }
 }
 

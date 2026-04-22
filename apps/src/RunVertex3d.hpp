@@ -135,7 +135,7 @@ void RunVertex3d(const CryptBuddingParams& p, const std::string& outputDir)
         if (p.enableStochasticFourType)
         {
             // 4-type model: WildType=SC, TACellMutationState=TA, Paneth/EC=Diff
-            AssignStochasticFourType(p_cell, p, p_stem_mut, p_ta_s4_mut, p_paneth_mut, p_ta, p_diff);
+            AssignStochasticFourType(p_cell, p, p_stem_mut, p_ta_s4_mut, p_paneth_mut, p_ec_mut, p_ta, p_diff);
         }
         else
         {

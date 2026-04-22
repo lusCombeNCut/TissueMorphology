@@ -1,33 +1,52 @@
-# =============================================================================
-# .gitignore — TissueMorphology project
-# =============================================================================
-
-# ---- Build artifacts ----
+# Build artifacts
 build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+CTestTestfile.cmake
 test/Testing/
+
+# Output
 output/
-
-# ---- Python caches ----
-__pycache__/
-*.pyc
-*.pyo
-
-# ---- Generated output (large, should not be committed) ----
+debug_output/
 visualization_output/
 invasion_analysis_output/
 ecm_comparison_output/
-*.log
+2d_sim_04042026/
+
+# Experiment results (large)
 experiments/ECMStiffnessSweep/results-download/*
 experiments/ECMStiffnessSweep/failed-run-logs/*
 
-# ---- IDE / editor files ----
+# Generated Doxygen docs
+docs/api/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.venv
+
+# Logs
+*.log
+
+# IDE / editor
 .vscode/
+.idea/
 *.swp
 *.swo
 *~
-2d_sim_04042026/
+.DS_Store
 
-debug_output/
-docs/api/
-__pycache__/
+# Academic literature PDFs
 *academicLiterature/
+
+# Compiled binaries
+*.o
+*.a
+*.so
+*.out

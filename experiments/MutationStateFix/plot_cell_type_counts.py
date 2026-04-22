@@ -27,7 +27,7 @@ from vtk.util.numpy_support import vtk_to_numpy
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 # Archive structure: mutation_state_fix_<TIMESTAMP>/{vertex2d,node2d}/g{Pa}_r{rep}/...
-ARCHIVE_BASE = '/home/orlando/Thesis/sim_results/mutation_state_fix_2026-04-10_11-48-53'
+ARCHIVE_BASE = '/home/orlando/Thesis/sim_results/mutation_state_fix_2026-04-10_14-15-05'
 VERTEX_ROOT  = os.path.join(ARCHIVE_BASE, 'vertex2d')
 NODE_ROOT    = os.path.join(ARCHIVE_BASE, 'node2d')
 
@@ -216,7 +216,7 @@ def make_figure(root, model_label, node_model, output_path):
         return
 
     n_panels = len(group_data)
-    fig, axes = plt.subplots(1, n_panels, figsize=(5 * n_panels, 4),
+    fig, axes = plt.subplots(1, n_panels, figsize=(4 * n_panels, 3),
                              sharey=False, sharex=True)
     if n_panels == 1:
         axes = [axes]

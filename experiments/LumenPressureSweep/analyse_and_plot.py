@@ -23,7 +23,7 @@ import glob
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analysis_utils import *
-from analysis_utils import _save_fig
+from analysis_utils import _save_fig, _crypt_count_mod, _add_legend
 
 try:
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
@@ -138,6 +138,7 @@ def load_pressure_sweep(base_dir, model_filter=None):
             run_num = params.get('simulation', {}).get('runNumber', 0)
 
         data = load_crypt_summary(csv_path)
+        data['_data_dir'] = os.path.dirname(csv_path)
         sweep[model][pressure].append((run_num, data))
 
     return dict(sweep)
@@ -169,7 +170,6 @@ def plot_pressure_specific(sweep_data, model_type, plots_dir, L0_um):
                     label=f'{pval} {PARAM_UNIT}')
     ax.set_xlabel('Time (hours)')
     ax.set_ylabel('Radial Growth Rate (\u00b5m/h)')
-    ax.set_title(f'{model_type}: Radial Growth Rate vs Lumen Pressure')
     _add_legend(ax, title=PARAM_NAME, ncol=2)
     ax.axhline(0, color='gray', linewidth=0.5)
 
@@ -195,7 +195,6 @@ def plot_pressure_specific(sweep_data, model_type, plots_dir, L0_um):
                 ax.plot(times, mean, color=colours[pval], label=f'{pval} {PARAM_UNIT}')
     ax.set_xlabel('Time (hours)')
     ax.set_ylabel('Normalised Budding Amplitude (r_range / mean_r)')
-    ax.set_title(f'{model_type}: Normalised Budding vs Lumen Pressure')
     _add_legend(ax, title=PARAM_NAME, ncol=2)
 
     path = os.path.join(plots_dir, f'{model_type}_normalised_budding.svg')

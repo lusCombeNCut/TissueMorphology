@@ -1,14 +1,6 @@
 # Development History
 
-Historical documents recording the biological motivation and design evolution of the TissueMorphology project. These files are **archived** — they may reference deprecated classes or parameter names. Use the [equations/](../equations/) folder for current mathematical reference.
-
-## Files
-
-| Document | Status | Summary |
-|----------|--------|---------|
-| [THREE_FACTOR_MODEL.md](THREE_FACTOR_MODEL.md) | Archived | Original three-factor morphogenesis hypothesis (apical constriction, differential adhesion, BM stiffness). Superseded by current 10+ force architecture. |
-| [CELL_PROLIFERATION_IMPLEMENTATION.md](CELL_PROLIFERATION_IMPLEMENTATION.md) | Archived | Early contact inhibition implementation notes. Superseded by `StochasticFourTypeCellCycleModel` — see [equations/ConstitutiveEquations_CellCycles.md](../equations/ConstitutiveEquations_CellCycles.md). |
-| [INVASIVE_FRONT.md](INVASIVE_FRONT.md) | Archived | Invasive front experiments with Metzcar et al. ECM fibre model. Incomplete — see thesis Section 2.3.1 for the validated replication. |
+Archived design rationale. For current mathematical reference see [equations/](../equations/).
 
 ## Key design decisions
 

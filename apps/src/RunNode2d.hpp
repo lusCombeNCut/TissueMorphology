@@ -77,6 +77,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
     MAKE_PTR(WildTypeCellMutationState, p_state);
     MAKE_PTR(TACellMutationState, p_ta_mut);
     MAKE_PTR(PanethCellMutationState, p_paneth_mut);
+    MAKE_PTR(EnterocyteCellMutationState, p_ec_mut);
     MAKE_PTR(StemCellProliferativeType, p_stem);
     MAKE_PTR(TransitCellProliferativeType, p_ta);
     MAKE_PTR(DifferentiatedCellProliferativeType, p_diff);
@@ -90,7 +91,7 @@ void RunNode2d(const CryptBuddingParams& p, const std::string& outputDir)
 
         if (p.enableStochasticFourType)
         {
-            AssignStochasticFourType(p_cell, p, p_state, p_ta_mut, p_paneth_mut, p_ta, p_diff);
+            AssignStochasticFourType(p_cell, p, p_state, p_ta_mut, p_paneth_mut, p_ec_mut, p_ta, p_diff);
         }
         else
         {
